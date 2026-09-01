@@ -75,12 +75,12 @@ dist: re windows
 	@echo "Création de la distribution Linux..."
 	@mkdir -p $(DIST_DIR)/$(TARGET)_linux
 	@cp $(BIN_DIR)/$(TARGET) $(DIST_DIR)/$(TARGET)_linux/
-	@cp -r $(ASSET_DIR) $(DIST_DIR)/$(TARGET)_linux/ 2>/dev/null || true
+	@cp -r $(ASSET_DIR) $(DIST_DIR)/$(TARGET)_linux/
 	@cd $(DIST_DIR) && zip -r $(TARGET)_linux.zip $(TARGET)_linux > /dev/null
 	@echo "Création de la distribution Windows..."
 	@mkdir -p $(DIST_DIR)/$(TARGET)_windows
 	@cp $(BIN_DIR)/$(WIN_TARGET) $(DIST_DIR)/$(TARGET)_windows/
-	@cp -r $(ASSET_DIR) $(DIST_DIR)/$(TARGET)_windows/ 2>/dev/null || true
+	@cp -r $(ASSET_DIR) $(DIST_DIR)/$(TARGET)_windows/
 	@cd $(DIST_DIR) && zip -r $(TARGET)_windows.zip $(TARGET)_windows > /dev/null
 	@echo "Fichiers ZIP générés dans le dossier $(DIST_DIR)/"
 

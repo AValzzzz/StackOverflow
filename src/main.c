@@ -84,8 +84,6 @@ static void updateRenderTransform(void)
 #define EPHEMERAL_INTERVAL_TURNS 4
 #define EPHEMERAL_PLAY_WINDOW 2
 
-#define POWER_BUDGET_PER_ROUND 3
-
 #define EVENT_TRIGGER_CHANCE_PERCENT 35
 #define EVENT_GOLD_REWARD 2
 
@@ -108,7 +106,6 @@ static void updateRenderTransform(void)
 #define FLY_DURATION 0.32f
 #define FLY_IN_DELAY 0.15f
 
-#define COMBO_MULT_CAP 5
 #define SCORE_POPUP_DURATION 1.1f
 
 #define COMBO_FLASH_DURATION 0.5f
@@ -165,7 +162,8 @@ typedef enum GamePhase {
 
 typedef enum GameOverReason {
     REASON_CRASH,
-    REASON_QUOTA
+    REASON_QUOTA,
+    REASON_TURN_LIMIT
 } GameOverReason;
 
 typedef enum BossType {
@@ -176,8 +174,9 @@ typedef enum BossType {
     BOSS_RESTRICTED_BOARD,
     BOSS_HIDDEN_CARDS,    
     BOSS_ROTTEN_DISCARD,  
-    BOSS_EPHEMERAL_CARDS, 
-    BOSS_SCORE_THRESHOLD, 
+    BOSS_EPHEMERAL_CARDS,
+    BOSS_SCORE_THRESHOLD,
+    BOSS_FORCED_DIAGONAL,
     BOSS_TYPE_COUNT
 } BossType;
 
@@ -196,7 +195,7 @@ typedef struct StartingClassInfo {
 static const StartingClassInfo CLASS_INFO[CLASS_COUNT] = {
     [CLASS_COMPILER]  = { "Compiler",  "Free Compiler Patch script +\n2 pre-glitched cards in the deck" },
     [CLASS_BANKER]    = { "Banker",    "Starts with Banker Chip:\nface cards score 0 toward the limit" },
-    [CLASS_ARCHITECT] = { "Architect", "Starts with Redundant Color:\nHearts=Diamonds, Clubs=Spades" },
+    [CLASS_ARCHITECT] = { "Architect", "Starts with Redundant Color:\nHearts=Diamonds, Clubs=Spades\n(half points unless exact suit)" },
 };
 
 typedef enum InteractionMode {
@@ -230,7 +229,6 @@ typedef struct FlyingCard {
 typedef struct ScorePopup {
     bool active;
     int chips;
-    int mult;
     float elapsed;
 } ScorePopup;
 
@@ -272,25 +270,27 @@ static const TutStep TUTORIAL_SCRIPT[] = {
     { TUT_CELL, 2, 1, "Click the glowing cell to pick the second card to swap with.", NULL, TUT_HL_NONE },
     { TUT_HAND, 1, 0, "Nicely done! Click your next card.", NULL, TUT_HL_NONE },
     { TUT_CELL, 2, 2, "Click the glowing cell to place it.", NULL, TUT_HL_NONE },
-    { TUT_CELL, 1, 2, "QUEENS trigger ABSORB & LOCK: zero out and lock a neighbor cell.",
+    { TUT_CELL, 1, 2, "QUEENS trigger ABSORB & LOCK: resets a neighbor cell's value to 0 and locks it.",
                       "Click the glowing cell to pick a neighbor to lock.", TUT_HL_NONE },
     { TUT_CELL, 2, 1, "Click the glowing cell to lock a second neighbor too.", NULL, TUT_HL_NONE },
     { TUT_HAND, 2, 0, "One more face card - click it.", NULL, TUT_HL_NONE },
     { TUT_CELL, 0, 1, "Click the glowing cell to place it.", NULL, TUT_HL_NONE },
     { TUT_YES, 0, 0, "KINGS trigger FLIP: switch whether rows/columns or diagonals score.",
-                     "Click YES to switch to diagonal-only detection.", TUT_HL_NONE },
+                     "Diagonal combos score double. Click YES to switch to diagonal-only detection.", TUT_HL_NONE },
     { TUT_HAND, 3, 0, "Last card! Click it.", NULL, TUT_HL_NONE },
     { TUT_CELL, 2, 0, "ACES are smart: they pick 1 or 11, whichever helps you most.",
                       "Click the glowing cell to place it.", TUT_HL_NONE },
     { TUT_WAIT, 0, 0, "Watch closely...", NULL, TUT_HL_NONE },
     { TUT_MSG, 0, 0, "That's a SAME SUIT combo! 3 cells of one suit in a row, column, or diagonal.",
                      "A combo scores points AND refills those cells - which lowers your Stack Score.", TUT_HL_GRID },
-    { TUT_MSG, 0, 0, "SAME SUIT is just one of 4 ways to match a line, worth 100 pts.",
-                     "STRAIGHT (3 consecutive ranks) is 250 pts; N-OF-A-KIND (3 same rank) is 400 pts.", TUT_HL_GRID },
-    { TUT_MSG, 0, 0, "STRAIGHT FLUSH (consecutive AND same suit) is worth 1000 pts and wipes",
-                     "the whole grid! STRAIGHT and N-OF-A-KIND also halve your Stack Score.", TUT_HL_GRID },
+    { TUT_MSG, 0, 0, "SAME SUIT is just one of 4 ways to match a line, worth 100+ pts.",
+                     "STRAIGHT (3 consecutive ranks) is 250+ pts; N-OF-A-KIND (3 same rank) is 400+ pts.", TUT_HL_GRID },
+    { TUT_MSG, 0, 0, "All 4 combo types score more when built from higher-value cards - riskier",
+                     "since those cards also push your Stack Score up faster.", TUT_HL_GRID },
+    { TUT_MSG, 0, 0, "STRAIGHT FLUSH (consecutive AND same suit) is worth 1000+ pts and wipes",
+                     "the whole grid! STRAIGHT and N-OF-A-KIND also halve your whole Stack Score, once per turn.", TUT_HL_GRID },
     { TUT_MSG, 0, 0, "The center cell is worth 1.5x on any combo through it - see its gold border.",
-                     "Scoring on consecutive turns also builds a streak that multiplies your points.", TUT_HL_L1CACHE },
+                     NULL, TUT_HL_L1CACHE },
     { TUT_MSG, 0, 0, "That's the core loop: score enough each round, don't let the grid overflow.",
                      "Spend gold you earn in the shop between rounds. Click to start your real run.", TUT_HL_NONE },
 };
@@ -331,7 +331,6 @@ typedef struct Game {
     int queenRow, queenCol;             
     int queenLockFirstRow, queenLockFirstCol;
 
-    int powerBudgetRemaining; 
     int extraPlaysRemaining;
     bool deckPeekActive;   
 
@@ -350,10 +349,8 @@ typedef struct Game {
     Hand undoHand;
     Deck undoDeck;
     int undoRoundScore;
-    int undoPowerBudget;
     int undoExtraPlays;
     int undoTurnCounter;
-    int undoComboStreak;
 
     char statusMessage[96];
     float statusMessageTimer;
@@ -365,8 +362,14 @@ typedef struct Game {
     Card shopCardOffer[SHOP_CARD_OFFER_COUNT];
     bool shopCardOfferSold[SHOP_CARD_OFFER_COUNT];
 
-    Card boughtCards[MAX_BOUGHT_CARDS]; 
+    Card boughtCards[MAX_BOUGHT_CARDS];
     int  boughtCardCount;
+
+    Card removedCards[MAX_BOUGHT_CARDS];
+    int  removedCardCount;
+
+    bool deckEditOpen;
+    bool deckEditUpgradeMode;
 
     bool shopSwapPromptActive;
     bool shopSwapIsModule;
@@ -379,8 +382,10 @@ typedef struct Game {
 
     bool deckPopupOpen;
 
-    bool isPaused;  
+    bool isPaused;
     bool wantsQuit;
+
+    float animSpeed;
 
     bool helpOverlayOpen; 
 
@@ -389,7 +394,6 @@ typedef struct Game {
 
     FlyingCard flyingCards[MAX_FLYING_CARDS];
 
-    int comboStreak;      
     ScorePopup scorePopup;
 
     float shakeTimer;
@@ -559,6 +563,52 @@ static void setModuleGridFlag(Game *g, ShopItemId id, bool active)
     if (id == ITEM_REDUNDANT_COLOR) memorygrid_setRedundantColorActive(&g->grid, active);
     else if (id == ITEM_BANKER_CHIP) memorygrid_setBankerChipActive(&g->grid, active);
     else if (id == ITEM_SEGFAULT_HANDLER) memorygrid_setSegfaultHandlerActive(&g->grid, active);
+    else if (id == ITEM_CACHE_BOOST) memorygrid_setCacheBoostActive(&g->grid, active);
+    else if (id == ITEM_LOOP_UNROLL) memorygrid_setFaceValueBoostActive(&g->grid, active);
+}
+
+static bool deckEditIsRemoved(const Game *g, Suit suit, Rank rank)
+{
+    for (int i = 0; i < g->removedCardCount; i++)
+        if (g->removedCards[i].suit == suit && g->removedCards[i].rank == rank) return true;
+    return false;
+}
+
+static int buildFullDeckComposition(const Game *g, Card out[DECK_MAX_SIZE])
+{
+    int count = 0;
+    for (Suit suit = 0; suit < SUIT_COUNT; suit++)
+    {
+        for (Rank rank = RANK_TWO; rank <= RANK_KING; rank++)
+            if (!deckEditIsRemoved(g, suit, rank)) out[count++] = card_make(suit, rank);
+        if (!deckEditIsRemoved(g, suit, RANK_ACE)) out[count++] = card_make(suit, RANK_ACE);
+    }
+    for (int i = 0; i < g->boughtCardCount; i++) out[count++] = g->boughtCards[i];
+    return count;
+}
+
+static Rank upgradeRank(Rank rank)
+{
+    int idx = rankSortIndex(rank);
+    return idx < 12 ? WILDCARD_RANKS[idx + 1] : rank;
+}
+
+static int deckEditCost(const Game *g)
+{
+    return (g->deckEditUpgradeMode ? 5 : 4) + g->roundNumber / 3;
+}
+
+static void deckEditRemoveCard(Game *g, Card card)
+{
+    for (int i = 0; i < g->boughtCardCount; i++)
+        if (g->boughtCards[i].suit == card.suit && g->boughtCards[i].rank == card.rank)
+        {
+            for (int j = i; j < g->boughtCardCount - 1; j++) g->boughtCards[j] = g->boughtCards[j + 1];
+            g->boughtCardCount--;
+            return;
+        }
+    if (g->removedCardCount < MAX_BOUGHT_CARDS)
+        g->removedCards[g->removedCardCount++] = card;
 }
 
 static Rectangle menuButtonRect(int index, float topY)
@@ -611,10 +661,68 @@ static void drawButton(Rectangle rect, const char *label, Color color, bool enab
     }
 }
 
+static void drawGlow(Rectangle rect, Color color, float intensity)
+{
+    BeginBlendMode(BLEND_ADDITIVE);
+    const int LAYERS = 5;
+    for (int i = LAYERS; i >= 1; i--)
+    {
+        float grow = i * 7.0f;
+        Rectangle layer = { rect.x - grow, rect.y - grow, rect.width + 2 * grow, rect.height + 2 * grow };
+        float alphaT = (1.0f - (float)i / (float)LAYERS) * intensity;
+        Color layerColor = Fade(color, alphaT * 0.5f);
+        DrawRectangleRounded(layer, 0.35f, 12, layerColor);
+    }
+    EndBlendMode();
+}
+
 static void drawTextCentered(const char *text, float centerX, float y, int fontSize, Color color)
 {
     int w = MeasureText(text, fontSize);
     DrawText(text, (int)(centerX - w / 2.0f), (int)y, fontSize, color);
+}
+
+static float drawTextWrapped(const char *text, float x, float y, float maxWidth, int fontSize, float lineHeight, Color color)
+{
+    char line[512] = { 0 };
+    float cursorY = y;
+    const char *wordStart = text;
+
+    while (*wordStart)
+    {
+        const char *wordEnd = wordStart;
+        while (*wordEnd && *wordEnd != ' ') wordEnd++;
+        int wordLen = (int)(wordEnd - wordStart);
+        if (wordLen > 200) wordLen = 200;
+
+        char candidate[512];
+        int lineLen = (int)strlen(line);
+        #pragma GCC diagnostic push
+        #pragma GCC diagnostic ignored "-Wformat-truncation"
+        if (lineLen > 0) snprintf(candidate, sizeof(candidate), "%s %.*s", line, wordLen, wordStart);
+        else snprintf(candidate, sizeof(candidate), "%.*s", wordLen, wordStart);
+        #pragma GCC diagnostic pop
+
+        if (lineLen > 0 && MeasureText(candidate, fontSize) > (int)maxWidth)
+        {
+            DrawText(line, (int)x, (int)cursorY, fontSize, color);
+            cursorY += lineHeight;
+            snprintf(line, sizeof(line), "%.*s", wordLen, wordStart);
+        }
+        else
+        {
+            snprintf(line, sizeof(line), "%s", candidate);
+        }
+
+        wordStart = wordEnd;
+        while (*wordStart == ' ') wordStart++;
+    }
+    if (line[0] != '\0')
+    {
+        DrawText(line, (int)x, (int)cursorY, fontSize, color);
+        cursorY += lineHeight;
+    }
+    return cursorY;
 }
 
 static void drawCardBack(Rectangle dest)
@@ -634,6 +742,35 @@ static void drawPile(Rectangle topRect, int count, bool showFaceOnTop, Card face
     }
     if (count == 0) DrawRectangleLinesEx(topRect, 1, COLOR_FREE_CELL);
     drawTextCentered(TextFormat("%d", count), topRect.x + topRect.width / 2.0f, topRect.y + topRect.height + 6, 14, LIGHTGRAY);
+}
+
+static void drawComboLegendRow(float x, float y, Suit suits[3], Rank ranks[3], const char *label, Color labelColor)
+{
+    const float w = 24.0f, h = 34.0f, gap = 4.0f;
+    for (int i = 0; i < 3; i++)
+    {
+        Card c = card_make(suits[i], ranks[i]);
+        drawCard(&c, (Rectangle){ x + i * (w + gap), y, w, h });
+    }
+    DrawText(label, (int)(x + 3 * (w + gap) + 6), (int)(y + h / 2.0f - 8), 14, labelColor);
+}
+
+static void drawComboLegend(float x, float y)
+{
+    Suit sameSuits[3]  = { SUIT_HEART, SUIT_HEART, SUIT_HEART };
+    Rank sameRanks[3]  = { RANK_THREE, RANK_SEVEN, RANK_JACK };
+    Suit straightSuits[3] = { SUIT_HEART, SUIT_CLUB, SUIT_SPADE };
+    Rank straightRanks[3] = { RANK_FOUR, RANK_FIVE, RANK_SIX };
+    Suit brelanSuits[3] = { SUIT_HEART, SUIT_CLUB, SUIT_SPADE };
+    Rank brelanRanks[3] = { RANK_SEVEN, RANK_SEVEN, RANK_SEVEN };
+    Suit flushSuits[3]  = { SUIT_DIAMOND, SUIT_DIAMOND, SUIT_DIAMOND };
+    Rank flushRanks[3]  = { RANK_EIGHT, RANK_NINE, RANK_TEN };
+
+    float rowH = 40.0f;
+    drawComboLegendRow(x, y,               sameSuits,     sameRanks,     "SAME SUIT: 100+ pts",         COLOR_FLASH_SAME_SUIT);
+    drawComboLegendRow(x, y + rowH,        straightSuits, straightRanks, "STRAIGHT: 250+ pts (scales)", COLOR_FLASH_STRAIGHT);
+    drawComboLegendRow(x, y + rowH * 2,    brelanSuits,   brelanRanks,   "N-OF-A-KIND: 400+ pts (scales)", COLOR_FLASH_BRELAN);
+    drawComboLegendRow(x, y + rowH * 3,    flushSuits,    flushRanks,    "STRAIGHT FLUSH: 1000+ pts", COLOR_FLASH_STRAIGHT_FLUSH);
 }
 
 static float easeOutBack(float t)
@@ -724,6 +861,7 @@ static const char *bossHudMessage(const Game *g)
         case BOSS_ROTTEN_DISCARD:   return "BOSS: Rotten Discard - rot blocks a cell";
         case BOSS_EPHEMERAL_CARDS:  return "BOSS: Ephemeral - play marked card in time";
         case BOSS_SCORE_THRESHOLD:  return "BOSS: Score Threshold - weak lines pay less";
+        case BOSS_FORCED_DIAGONAL: return "BOSS: Forced Diagonal - only diagonals score, King can't flip";
         default:                    return "";
     }
 }
@@ -918,19 +1056,8 @@ static void finishCascade(Game *g)
     bool anyCombo = g->cascade.anyCombo;
     g->cascade.active = false;
 
-    int mult = 1;
-    if (anyCombo)
-    {
-        g->comboStreak++;
-        if (g->comboStreak > COMBO_MULT_CAP) g->comboStreak = COMBO_MULT_CAP;
-        mult = g->comboStreak;
-    }
-    else
-    {
-        g->comboStreak = 0;
-    }
-    int gained = chips * mult;
-    if (inventory_hasModule(&g->inventory, ITEM_OVERCLOCK)) gained = (int)(gained * 1.2f); 
+    int gained = chips;
+    if (inventory_hasModule(&g->inventory, ITEM_OVERCLOCK)) gained = (int)(gained * 1.2f);
 
     if (g->roundNumber >= FULL_STACK_MIN_ROUND && totalMatches >= 2)
     {
@@ -943,11 +1070,10 @@ static void finishCascade(Game *g)
     {
         g->scorePopup.active = true;
         g->scorePopup.chips = chips;
-        g->scorePopup.mult = mult;
         g->scorePopup.elapsed = 0.0f;
 
-        if (mult >= 2 || totalMatches >= 2)
-            triggerShake(g, SHAKE_DURATION_COMBO, 5.0f + mult * 2.0f + fminf((float)totalMatches, 6.0f));
+        if (totalMatches >= 2)
+            triggerShake(g, SHAKE_DURATION_COMBO, 5.0f + fminf((float)totalMatches, 6.0f) * 2.0f);
     }
 
     if (g->roundScore >= g->roundCfg.objective)
@@ -980,6 +1106,13 @@ static void finishCascade(Game *g)
     {
         g->phase = PHASE_GAME_OVER;
         g->gameOverReason = REASON_QUOTA;
+        return;
+    }
+
+    if (g->turnCounter >= g->roundCfg.turnLimit)
+    {
+        g->phase = PHASE_GAME_OVER;
+        g->gameOverReason = REASON_TURN_LIMIT;
     }
 }
 
@@ -1088,13 +1221,12 @@ static void endOrContinueTurn(Game *g)
 static void afterCardPlaced(Game *g, Rank playedRank, int row, int col)
 {
     audio_playPlace();
-    bool powerAvailable = g->powerBudgetRemaining > 0;
 
-    if (playedRank == RANK_JACK && powerAvailable)
+    if (playedRank == RANK_JACK)
     {
         g->mode = MODE_AWAITING_SWAP_FIRST;
     }
-    else if (playedRank == RANK_QUEEN && powerAvailable)
+    else if (playedRank == RANK_QUEEN)
     {
         g->queenRow = row;
         g->queenCol = col;
@@ -1102,14 +1234,14 @@ static void afterCardPlaced(Game *g, Rank playedRank, int row, int col)
         g->queenLockFirstCol = -1;
         g->mode = MODE_AWAITING_QUEEN_LOCK_FIRST;
     }
-    else if (playedRank == RANK_KING && powerAvailable && g->grid.diagonalModeFrozenTurns == 0)
+    else if (playedRank == RANK_KING && g->grid.diagonalModeFrozenTurns == 0 && !g->grid.diagonalModeForced)
     {
         g->mode = MODE_AWAITING_FLIP_CHOICE;
     }
     else
     {
-        if (!powerAvailable && (playedRank == RANK_JACK || playedRank == RANK_QUEEN || playedRank == RANK_KING))
-            setStatus(g, "OUT OF POWER BUDGET THIS ROUND");
+        if (playedRank == RANK_KING && g->grid.diagonalModeForced)
+            setStatus(g, "KING: axis is forced this round and can't be flipped");
         else if (playedRank == RANK_KING)
             setStatus(g, TextFormat("KING: axis locked for %d more turn(s)", g->grid.diagonalModeFrozenTurns));
         g->mode = MODE_IDLE;
@@ -1144,6 +1276,18 @@ static void applyRottenDiscardPenalty(Game *g)
     g->tempBlockTurnsLeft = 1;
     memorygrid_blockCell(&g->grid, g->tempBlockRow, g->tempBlockCol);
     setStatus(g, "ROTTEN DISCARD: a card rotted - a cell is blocked next turn");
+}
+
+static void addRandomRottenSlotAnywhere(Game *g)
+{
+    int gridCount = memorygrid_countRottenCandidates(&g->grid);
+    int handCount = hand_countRottenCandidates(&g->hand);
+    int total = gridCount + handCount;
+    if (total <= 0) return;
+
+    int pick = GetRandomValue(0, total - 1);
+    if (pick < gridCount) memorygrid_addRottenSlotAtIndex(&g->grid, pick);
+    else hand_addRottenSlotAtIndex(&g->hand, pick - gridCount);
 }
 
 static void tickEphemeralCard(Game *g)
@@ -1185,10 +1329,8 @@ static void commitPlacement(Game *g, int handIndex, int row, int col)
     g->undoHand = g->hand;
     g->undoDeck = g->deck;
     g->undoRoundScore = g->roundScore;
-    g->undoPowerBudget = g->powerBudgetRemaining;
     g->undoExtraPlays = g->extraPlaysRemaining;
     g->undoTurnCounter = g->turnCounter;
-    g->undoComboStreak = g->comboStreak;
     g->hasUndoSnapshot = true;
 
     Rectangle fromHandRect = handSlotRect(handIndex, g->hand.capacity);
@@ -1200,8 +1342,15 @@ static void commitPlacement(Game *g, int handIndex, int row, int col)
     deck_discard(&g->deck, displaced);
     spawnFlyingCard(g, played, fromHandRect, gridCellRect(row, col, g->grid.size), 0.0f);
     g->turnCounter++;
-    bool justRotted = hand_ageHeldCards(&g->hand, g->turnCounter > HAND_ROT_GRACE_TURNS);
-    if (justRotted && g->currentBossType == BOSS_ROTTEN_DISCARD) applyRottenDiscardPenalty(g);
+    if (g->roundCfg.rottenSlotsActive)
+    {
+        if (g->turnCounter % 3 == 0) addRandomRottenSlotAnywhere(g);
+    }
+    else
+    {
+        bool justRotted = hand_ageHeldCards(&g->hand, g->turnCounter > HAND_ROT_GRACE_TURNS);
+        if (justRotted && g->currentBossType == BOSS_ROTTEN_DISCARD) applyRottenDiscardPenalty(g);
+    }
     g->selectedHandIndex = -1;
 
     g->pendingPowerResolution = true;
@@ -1222,6 +1371,7 @@ static void resolveUnstableDeckPick(Game *g, bool pickedA)
     Card other  = pickedA ? g->unstableDeckOptionB : g->unstableDeckOptionA;
 
     g->hand.cards[g->unstableDeckSlot] = chosen;
+    if (g->hand.rottenSlot[g->unstableDeckSlot]) g->hand.cards[g->unstableDeckSlot].isRotted = true;
     g->hand.occupied[g->unstableDeckSlot] = true;
     g->hand.turnsHeld[g->unstableDeckSlot] = 0;
     g->hand.count++;
@@ -1295,6 +1445,8 @@ static void startNewRound(Game *g)
     }
 
     deck_initStandard52(&g->deck);
+    for (int i = 0; i < g->removedCardCount; i++)
+        deck_removeOneMatching(&g->deck, g->removedCards[i].suit, g->removedCards[i].rank);
     for (int i = 0; i < g->boughtCardCount; i++) deck_injectCard(&g->deck, g->boughtCards[i]);
     deck_shuffle(&g->deck);
 
@@ -1327,6 +1479,8 @@ static void startNewRound(Game *g)
         memorygrid_setBannedAxis(&g->grid, GetRandomValue(BANNED_AXIS_ROWS, BANNED_AXIS_DIAGONALS));
     if (g->currentBossType == BOSS_SCORE_THRESHOLD)
         memorygrid_setScoreThresholdActive(&g->grid, true);
+    if (g->currentBossType == BOSS_FORCED_DIAGONAL)
+        memorygrid_setDiagonalModeForced(&g->grid, true);
 
     g->tempBlockRow = -1;
     g->tempBlockCol = -1;
@@ -1364,7 +1518,6 @@ static void startNewRound(Game *g)
     g->roundScore = 0;
     g->mode = MODE_IDLE;
     g->isDragging = false;
-    g->powerBudgetRemaining = POWER_BUDGET_PER_ROUND;
     g->extraPlaysRemaining = 0;
     g->deckPeekActive = false;
     g->pendingPowerResolution = false;
@@ -1372,7 +1525,6 @@ static void startNewRound(Game *g)
     g->statusMessage[0] = '\0';
     g->statusMessageTimer = 0.0f;
     g->deckPopupOpen = false;
-    g->comboStreak = 0;
     g->turnCounter = 0;
     g->scorePopup.active = false;
     for (int i = 0; i < MAX_FLYING_CARDS; i++) g->flyingCards[i].active = false;
@@ -1390,6 +1542,8 @@ static void startTutorial(Game *g)
     memorygrid_construct(&g->grid);
     g->pendingEventCorruptCard = false;
     g->boughtCardCount = 0;
+    g->removedCardCount = 0;
+    g->deckEditOpen = false;
     g->startingClass = CLASS_COMPILER;
 
     g->roundCfg = round_getConfig(1);
@@ -1438,7 +1592,6 @@ static void startTutorial(Game *g)
     g->roundScore = 0;
     g->mode = MODE_IDLE;
     g->isDragging = false;
-    g->powerBudgetRemaining = POWER_BUDGET_PER_ROUND;
     g->extraPlaysRemaining = 0;
     g->deckPeekActive = false;
     g->pendingPowerResolution = false;
@@ -1446,7 +1599,6 @@ static void startTutorial(Game *g)
     g->statusMessage[0] = '\0';
     g->statusMessageTimer = 0.0f;
     g->deckPopupOpen = false;
-    g->comboStreak = 0;
     g->turnCounter = 0;
     g->scorePopup.active = false;
     for (int i = 0; i < MAX_FLYING_CARDS; i++) g->flyingCards[i].active = false;
@@ -1525,9 +1677,7 @@ static void drawTutorialOverlay(const Game *g)
     if (hasTarget)
     {
         float pulse = (sinf((float)GetTime() * 6.0f) + 1.0f) / 2.0f;
-        Color glow = { COLOR_PROMPT.r, COLOR_PROMPT.g, COLOR_PROMPT.b, (unsigned char)(140 + pulse * 100) };
-        Rectangle ring = { target.x - 6, target.y - 6, target.width + 12, target.height + 12 };
-        DrawRectangleLinesEx(ring, 4, glow);
+        drawGlow(target, COLOR_PROMPT, 0.7f + pulse * 0.3f);
     }
 }
 
@@ -1571,8 +1721,11 @@ static void fullRestart(Game *g)
     memorygrid_construct(&g->grid);
     g->pendingEventCorruptCard = false;
     g->boughtCardCount = 0;
+    g->removedCardCount = 0;
+    g->deckEditOpen = false;
+    g->deckEditUpgradeMode = false;
     g->phase = PHASE_CLASS_SELECT;
-    g->tutorialActive = false; 
+    g->tutorialActive = false;
     g->cascade.active = false;
 }
 
@@ -1595,9 +1748,10 @@ int main(void)
     RenderTexture2D canvas = LoadRenderTexture(SCREEN_WIDTH, SCREEN_HEIGHT);
     SetTextureFilter(canvas.texture, TEXTURE_FILTER_POINT);
 
-    Game game = { 0 }; 
+    Game game = { 0 };
+    game.animSpeed = 1.0f;
     fullRestart(&game);
-    game.phase = PHASE_MAIN_MENU; 
+    game.phase = PHASE_MAIN_MENU;
 
     while (!WindowShouldClose() && !game.wantsQuit)
     {
@@ -1607,9 +1761,14 @@ int main(void)
         if (IsKeyPressed(KEY_F11) || (IsKeyPressed(KEY_ENTER) && (IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT))))
             ToggleBorderlessWindowed();
 
+        if (IsKeyPressed(KEY_TAB))
+        {
+            g->animSpeed = (g->animSpeed >= 4.0f) ? 1.0f : g->animSpeed * 2.0f;
+        }
+
         if (g->statusMessageTimer > 0.0f) g->statusMessageTimer -= GetFrameTime();
 
-        float dt = GetFrameTime();
+        float dt = GetFrameTime() * g->animSpeed;
         for (int i = 0; i < MAX_FLYING_CARDS; i++)
         {
             if (!g->flyingCards[i].active) continue;
@@ -1666,6 +1825,46 @@ int main(void)
         {
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsKeyPressed(KEY_ESCAPE)) g->deckPopupOpen = false;
         }
+        else if (g->deckEditOpen)
+        {
+            if (IsKeyPressed(KEY_ESCAPE)) g->deckEditOpen = false;
+            else if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+            {
+                Vector2 mouse = GetMousePosition();
+                Rectangle removeBtn = { SCREEN_WIDTH / 2.0f - 220, 95, 200, 40 };
+                Rectangle upgradeBtn = { SCREEN_WIDTH / 2.0f + 20, 95, 200, 40 };
+                Rectangle closeBtn = { SCREEN_WIDTH - 130, 20, 100, 40 };
+                if (CheckCollisionPointRec(mouse, removeBtn)) g->deckEditUpgradeMode = false;
+                else if (CheckCollisionPointRec(mouse, upgradeBtn)) g->deckEditUpgradeMode = true;
+                else if (CheckCollisionPointRec(mouse, closeBtn)) g->deckEditOpen = false;
+                else
+                {
+                    Card composition[DECK_MAX_SIZE];
+                    int n = buildFullDeckComposition(g, composition);
+                    int cost = deckEditCost(g);
+                    for (int i = 0; i < n; i++)
+                    {
+                        if (!CheckCollisionPointRec(mouse, deckPopupCardRect(i))) continue;
+                        if (g->gold < cost) { setStatus(g, TextFormat("Not enough gold - costs $%d", cost)); break; }
+                        g->gold -= cost;
+                        Card target = composition[i];
+                        deckEditRemoveCard(g, target);
+                        if (g->deckEditUpgradeMode && g->boughtCardCount < MAX_BOUGHT_CARDS)
+                        {
+                            Card upgraded = card_make(target.suit, upgradeRank(target.rank));
+                            g->boughtCards[g->boughtCardCount++] = upgraded;
+                            setStatus(g, "DECK EDIT: card upgraded");
+                        }
+                        else
+                        {
+                            setStatus(g, "DECK EDIT: card removed");
+                        }
+                        audio_playSlide();
+                        break;
+                    }
+                }
+            }
+        }
         else if (g->isPaused)
         {
             if (IsKeyPressed(KEY_ESCAPE))
@@ -1675,9 +1874,11 @@ int main(void)
             else if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
             {
                 Vector2 mouse = GetMousePosition();
-                if (CheckCollisionPointRec(mouse, pauseButtonRect(0))) g->isPaused = false; 
-                else if (CheckCollisionPointRec(mouse, pauseButtonRect(1))) { g->isPaused = false; fullRestart(g); } 
+                if (CheckCollisionPointRec(mouse, pauseButtonRect(0))) g->isPaused = false;
+                else if (CheckCollisionPointRec(mouse, pauseButtonRect(1))) { g->isPaused = false; fullRestart(g); }
                 else if (CheckCollisionPointRec(mouse, pauseButtonRect(2))) g->wantsQuit = true;
+                else if (CheckCollisionPointRec(mouse, pauseButtonRect(3)))
+                    g->animSpeed = (g->animSpeed >= 4.0f) ? 1.0f : g->animSpeed * 2.0f;
             }
         }
         else if (g->phase == PHASE_PLAYING && IsKeyPressed(KEY_ESCAPE) && !g->tutorialActive)
@@ -1872,6 +2073,9 @@ int main(void)
                     else
                         proceedToNextRound(g);
                 }
+
+                Rectangle editDeckBtn = { SCREEN_WIDTH / 2.0f + 110, 610, 150, 50 };
+                if (CheckCollisionPointRec(mouse, editDeckBtn)) g->deckEditOpen = true;
             }
         }
         else if (g->phase == PHASE_EVENT)
@@ -1927,7 +2131,6 @@ int main(void)
                 if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(GetMousePosition(), flipChoiceRect(0)))
                 {
                     memorygrid_toggleAxisMode(&g->grid);
-                    g->powerBudgetRemaining--;
                     g->mode = MODE_IDLE;
                     tutorialAdvance(g);
                     endOrContinueTurn(g);
@@ -1939,7 +2142,7 @@ int main(void)
                 bool clickNo  = IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(GetMousePosition(), flipChoiceRect(1));
                 if (IsKeyPressed(KEY_Y) || clickYes)
                 {
-                    if (memorygrid_toggleAxisMode(&g->grid)) g->powerBudgetRemaining--;
+                    memorygrid_toggleAxisMode(&g->grid);
                     g->mode = MODE_IDLE;
                     endOrContinueTurn(g);
                 }
@@ -1990,7 +2193,6 @@ int main(void)
                     spawnFlyingCard(g, cardA, rectA, rectB, 0.0f);
                     spawnFlyingCard(g, cardB, rectB, rectA, 0.0f);
                     audio_playSlide();
-                    g->powerBudgetRemaining--;
                     g->mode = MODE_IDLE;
                     tutorialAdvance(g);
                     endOrContinueTurn(g);
@@ -2014,7 +2216,6 @@ int main(void)
                             spawnFlyingCard(g, cardA, rectA, rectB, 0.0f);
                             spawnFlyingCard(g, cardB, rectB, rectA, 0.0f);
                             audio_playSlide();
-                            g->powerBudgetRemaining--;
                             g->mode = MODE_IDLE;
                             endOrContinueTurn(g);
                         }
@@ -2059,7 +2260,6 @@ int main(void)
                     memorygrid_queenLock(&g->grid, g->queenRow, g->queenCol,
                                           g->queenLockFirstRow, g->queenLockFirstCol, row, col);
                     audio_playSlide();
-                    g->powerBudgetRemaining--;
                     g->mode = MODE_IDLE;
                     tutorialAdvance(g);
                     endOrContinueTurn(g);
@@ -2069,7 +2269,6 @@ int main(void)
             {
                 memorygrid_queenLock(&g->grid, g->queenRow, g->queenCol,
                                       g->queenLockFirstRow, g->queenLockFirstCol, -1, -1);
-                g->powerBudgetRemaining--;
                 g->mode = MODE_IDLE;
                 endOrContinueTurn(g);
             }
@@ -2087,7 +2286,6 @@ int main(void)
                     memorygrid_queenLock(&g->grid, g->queenRow, g->queenCol,
                                           g->queenLockFirstRow, g->queenLockFirstCol, row, col);
                     audio_playSlide();
-                    g->powerBudgetRemaining--;
                     g->mode = MODE_IDLE;
                     endOrContinueTurn(g);
                 }
@@ -2231,7 +2429,7 @@ int main(void)
                     ShopItemId id = (ShopItemId)g->inventory.scripts[i];
                     if (id == ITEM_BUFFER_RELOAD)
                     {
-                        hand_init(&g->hand, g->hand.capacity);
+                        hand_discardAll(&g->hand);
                         refillHandStep(g);
                         audio_playSlide();
                         inventory_consumeScript(&g->inventory, i);
@@ -2276,10 +2474,8 @@ int main(void)
                             g->hand = g->undoHand;
                             g->deck = g->undoDeck;
                             g->roundScore = g->undoRoundScore;
-                            g->powerBudgetRemaining = g->undoPowerBudget;
                             g->extraPlaysRemaining = g->undoExtraPlays;
                             g->turnCounter = g->undoTurnCounter;
-                            g->comboStreak = g->undoComboStreak;
                             g->hasUndoSnapshot = false;
                             g->selectedHandIndex = -1;
                             inventory_consumeScript(&g->inventory, i);
@@ -2289,6 +2485,18 @@ int main(void)
                         {
                             setStatus(g, "ROLLBACK: nothing to undo");
                         }
+                    }
+                    else if (id == ITEM_DEFRAG)
+                    {
+                        for (int h = 0; h < g->hand.capacity; h++)
+                        {
+                            g->hand.cards[h].isRotted = false;
+                            g->hand.turnsHeld[h] = 0;
+                            g->hand.rottenSlot[h] = false;
+                        }
+                        memorygrid_clearAllRot(&g->grid);
+                        inventory_consumeScript(&g->inventory, i);
+                        setStatus(g, "DEFRAG: all rot cleared");
                     }
                 }
 
@@ -2387,8 +2595,8 @@ int main(void)
                     DrawRectangleRec(box, boxColor);
                     DrawRectangleLinesEx(box, hover ? 3 : 2, info->isModule ? COLOR_ACCENT : COLOR_PROMPT);
                     DrawText(info->isModule ? "MODULE" : "SCRIPT", (int)box.x + 12, (int)box.y + 10, 14, GRAY);
-                    DrawText(info->name, (int)box.x + 12, (int)box.y + 30, 17, RAYWHITE);
-                    DrawText(info->description, (int)box.x + 12, (int)box.y + 58, 13, LIGHTGRAY);
+                    drawTextWrapped(info->name, box.x + 12, box.y + 30, box.width - 24, 17, 19, RAYWHITE);
+                    drawTextWrapped(info->description, box.x + 12, box.y + 58, box.width - 24, 13, 16, LIGHTGRAY);
                     DrawText(owned ? "OWNED" : sold ? "SOLD" : TextFormat("$%d", info->cost),
                              (int)box.x + 12, (int)box.y + 150, 20, (owned || sold) ? COLOR_ACCENT : COLOR_GOLD);
                 }
@@ -2460,6 +2668,9 @@ int main(void)
                 Rectangle continueBtn = { SCREEN_WIDTH / 2.0f - 100, 610, 200, 50 };
                 drawButton(continueBtn, "CONTINUE ->", COLOR_ACCENT, true, true);
 
+                Rectangle editDeckBtn = { SCREEN_WIDTH / 2.0f + 110, 610, 150, 50 };
+                drawButton(editDeckBtn, "EDIT DECK", COLOR_PROMPT, true, false);
+
                 if (g->statusMessageTimer > 0.0f)
                     drawTextCentered(g->statusMessage, SCREEN_WIDTH / 2.0f, 590, 16, COLOR_DANGER);
 
@@ -2484,7 +2695,7 @@ int main(void)
                         DrawRectangleRec(r, hover ? (Color){60,50,30,255} : COLOR_SLOT_BG);
                         DrawRectangleLinesEx(r, hover ? 3 : 2, COLOR_PROMPT);
                         DrawText(ownedInfo->name, (int)r.x + 12, (int)r.y + 10, 18, RAYWHITE);
-                        DrawText(ownedInfo->description, (int)r.x + 12, (int)r.y + 38, 13, LIGHTGRAY);
+                        drawTextWrapped(ownedInfo->description, r.x + 12, r.y + 38, r.width - 24 - 110, 13, 16, LIGHTGRAY);
                         drawTextCentered("click to swap out", r.x + r.width - 90, r.y + r.height / 2.0f - 8, 13, COLOR_DANGER);
                     }
 
@@ -2518,22 +2729,35 @@ int main(void)
                     const ShopItemInfo *info = shop_getItemInfo((ShopItemId)g->moduleChoiceOffer[i]);
                     DrawRectangleRec(box, hover ? (Color){35,65,55,255} : COLOR_SLOT_BG);
                     DrawRectangleLinesEx(box, hover ? 3 : 2, COLOR_ACCENT);
-                    DrawText(info->name, (int)box.x + 12, (int)box.y + 30, 17, RAYWHITE);
-                    DrawText(info->description, (int)box.x + 12, (int)box.y + 58, 13, LIGHTGRAY);
+                    drawTextWrapped(info->name, box.x + 12, box.y + 30, box.width - 24, 17, 19, RAYWHITE);
+                    drawTextWrapped(info->description, box.x + 12, box.y + 58, box.width - 24, 13, 16, LIGHTGRAY);
                     DrawText("FREE", (int)box.x + 12, (int)box.y + 150, 20, COLOR_ACCENT);
                 }
             }
             else
             {
                 DrawText("STACK OVERFLOW", 20, 20, 30, COLOR_ACCENT);
-                drawTextCentered("[H] Help", 20 + 175, 8, 13, GRAY);
+                DrawText("[H] Help", 300, 12, 13, GRAY);
+                DrawText(TextFormat("[TAB] Speed: %gx", g->animSpeed), 300, 28, 13, GRAY);
                 DrawText(TextFormat("Round %d", g->roundNumber), SCREEN_WIDTH / 2 - 50, 20, 24, RAYWHITE);
                 {
-                    bool rotActive = g->turnCounter > HAND_ROT_GRACE_TURNS;
-                    const char *turnMsg = rotActive
-                        ? TextFormat("Turn %d (cards can rot)", g->turnCounter)
-                        : TextFormat("Turn %d (rot in %d)", g->turnCounter, HAND_ROT_GRACE_TURNS - g->turnCounter + 1);
-                    drawTextCentered(turnMsg, SCREEN_WIDTH / 2.0f, 48, 14, rotActive ? COLOR_ROTTED_TINT : GRAY);
+                    const char *turnMsg;
+                    Color turnColor;
+                    if (g->roundCfg.rottenSlotsActive)
+                    {
+                        int nextRot = 3 - (g->turnCounter % 3);
+                        turnMsg = TextFormat("Turn %d / %d (next rotten slot in %d)", g->turnCounter, g->roundCfg.turnLimit, nextRot);
+                        turnColor = COLOR_ROTTED_TINT;
+                    }
+                    else
+                    {
+                        bool rotActive = g->turnCounter > HAND_ROT_GRACE_TURNS;
+                        turnMsg = rotActive
+                            ? TextFormat("Turn %d / %d (cards can rot)", g->turnCounter, g->roundCfg.turnLimit)
+                            : TextFormat("Turn %d / %d (rot in %d)", g->turnCounter, g->roundCfg.turnLimit, HAND_ROT_GRACE_TURNS - g->turnCounter + 1);
+                        turnColor = rotActive ? COLOR_ROTTED_TINT : GRAY;
+                    }
+                    drawTextCentered(turnMsg, SCREEN_WIDTH / 2.0f, 48, 14, turnColor);
                 }
                 DrawText(TextFormat("Gold: $%d", g->gold), SCREEN_WIDTH - 150, 20, 20, COLOR_GOLD);
 
@@ -2542,11 +2766,10 @@ int main(void)
                 if (g->grid.diagonalModeFrozenTurns > 0)
                     DrawText(TextFormat("Axis: %s (locked %d)", g->grid.diagonalMode ? "DIAGONAL" : "ROW/COL",
                                           g->grid.diagonalModeFrozenTurns), 20, 110, 18, COLOR_DANGER);
+                else if (g->grid.diagonalModeForced)
+                    DrawText("Axis: DIAGONAL (forced by boss)", 20, 110, 18, COLOR_BOSS);
                 else
                     DrawText(TextFormat("Axis: %s", g->grid.diagonalMode ? "DIAGONAL" : "ROW/COL"), 20, 110, 18, COLOR_ACCENT);
-                DrawText(TextFormat("Power Budget: %d / %d", g->powerBudgetRemaining, POWER_BUDGET_PER_ROUND), 20, 135, 16, COLOR_PROMPT);
-                if (g->comboStreak > 0)
-                    DrawText(TextFormat("Combo Streak: %d (x%d mult)", g->comboStreak, g->comboStreak), 220, 135, 16, COLOR_MULT);
 
                 if (g->cascade.active)
                 {
@@ -2566,7 +2789,7 @@ int main(void)
                     drawTextCentered("click", deckStackRect().x + PILE_CARD_W / 2.0f, deckStackRect().y - 16, 12, COLOR_PROMPT);
 
                 if (g->currentBossType != BOSS_NONE)
-                    DrawText(bossHudMessage(g), SCREEN_WIDTH - 420, 82, 13, COLOR_BOSS);
+                    drawTextWrapped(bossHudMessage(g), SCREEN_WIDTH - 420, 82, 400, 13, 15, COLOR_BOSS);
                 if (g->grid.disabledComboType != COMBO_NONE)
                     DrawText(TextFormat("MUTATOR: %s disabled this round", comboTypeName(g->grid.disabledComboType)),
                               SCREEN_WIDTH - 420, 100, 13, COLOR_DANGER);
@@ -2592,7 +2815,8 @@ int main(void)
                 }
 
 
-                Rectangle gaugeRect = { 20, 158, 220, 14 };
+                DrawText("Danger Meter (Stack Limit)", 20, 134, 13, GRAY);
+                Rectangle gaugeRect = { 20, 150, 220, 14 };
                 float stackRatio = (float)g->grid.stackScore / (float)g->roundCfg.stackLimit;
                 float gaugeFill = stackRatio < 0.0f ? 0.0f : (stackRatio > 1.0f ? 1.0f : stackRatio);
                 Color gaugeColor = (stackRatio < 0.5f) ? (Color){ 90, 200, 110, 255 }
@@ -2601,7 +2825,15 @@ int main(void)
                 DrawRectangleRec(gaugeRect, COLOR_GAUGE_BG);
                 DrawRectangleRec((Rectangle){ gaugeRect.x, gaugeRect.y, gaugeRect.width * gaugeFill, gaugeRect.height }, gaugeColor);
                 DrawRectangleLinesEx(gaugeRect, 1, RAYWHITE);
-                DrawText("Stack Score", (int)(gaugeRect.x + gaugeRect.width + 10), (int)gaugeRect.y - 1, 14, GRAY);
+
+                DrawText("Round Score Progress", 20, 170, 13, GRAY);
+                Rectangle roundGaugeRect = { 20, 186, 220, 14 };
+                float objectiveRatio = (float)g->roundScore / (float)g->roundCfg.objective;
+                float objectiveFill = objectiveRatio < 0.0f ? 0.0f : (objectiveRatio > 1.0f ? 1.0f : objectiveRatio);
+                DrawRectangleRec(roundGaugeRect, COLOR_GAUGE_BG);
+                DrawRectangleRec((Rectangle){ roundGaugeRect.x, roundGaugeRect.y, roundGaugeRect.width * objectiveFill, roundGaugeRect.height },
+                                  (Color){ 90, 200, 110, 255 });
+                DrawRectangleLinesEx(roundGaugeRect, 1, RAYWHITE);
 
                 for (int i = 0; i < MODULE_SLOTS; i++)
                 {
@@ -2625,6 +2857,40 @@ int main(void)
                     if (g->inventory.scripts[i] != NO_ITEM && g->mode == MODE_IDLE)
                         DrawText("click to use", (int)slot.x + 8, (int)slot.y + 70, 12, GRAY);
                 }
+
+                {
+                    Vector2 hudMouse = GetMousePosition();
+                    ShopItemId hoveredId = (ShopItemId)NO_ITEM;
+                    Rectangle hoveredSlot = { 0 };
+                    for (int i = 0; i < MODULE_SLOTS; i++)
+                    {
+                        Rectangle slot = moduleSlotRect(i, g->grid.size);
+                        if (g->inventory.modules[i] != NO_ITEM && CheckCollisionPointRec(hudMouse, slot))
+                        {
+                            hoveredId = (ShopItemId)g->inventory.modules[i];
+                            hoveredSlot = slot;
+                        }
+                    }
+                    for (int i = 0; i < SCRIPT_SLOTS; i++)
+                    {
+                        Rectangle slot = scriptSlotRect(i, g->grid.size);
+                        if (g->inventory.scripts[i] != NO_ITEM && CheckCollisionPointRec(hudMouse, slot))
+                        {
+                            hoveredId = (ShopItemId)g->inventory.scripts[i];
+                            hoveredSlot = slot;
+                        }
+                    }
+                    if (hoveredId != (ShopItemId)NO_ITEM)
+                    {
+                        const ShopItemInfo *info = shop_getItemInfo(hoveredId);
+                        Rectangle tip = { hoveredSlot.x, hoveredSlot.y + hoveredSlot.height + 6, 220, 60 };
+                        DrawRectangleRec(tip, COLOR_PANEL);
+                        DrawRectangleLinesEx(tip, 2, COLOR_PROMPT);
+                        drawTextWrapped(info->description, tip.x + 8, tip.y + 8, tip.width - 16, 13, 16, RAYWHITE);
+                    }
+                }
+
+                drawComboLegend(20, 375);
 
                 Vector2 mouseNow = GetMousePosition();
 
@@ -2906,22 +3172,7 @@ int main(void)
 
                     Vector2 center = { SCREEN_WIDTH / 2.0f, 225.0f };
                     int chipsSize = (int)(42 * scale);
-                    if (g->scorePopup.mult > 1)
-                    {
-                        int multSize = (int)(36 * scale);
-                        const char *chipsStr = TextFormat("%d", g->scorePopup.chips);
-                        const char *multStr = TextFormat("x%d", g->scorePopup.mult);
-                        int wChips = MeasureText(chipsStr, chipsSize);
-                        int wMult = MeasureText(multStr, multSize);
-                        float gap = 14.0f * scale;
-                        float startX = center.x - (wChips + gap + wMult) / 2.0f;
-                        DrawText(chipsStr, (int)startX, (int)(center.y - chipsSize / 2.0f), chipsSize, Fade(COLOR_CHIPS, alpha));
-                        DrawText(multStr, (int)(startX + wChips + gap), (int)(center.y - multSize / 2.0f), multSize, Fade(COLOR_MULT, alpha));
-                    }
-                    else
-                    {
-                        drawTextCentered(TextFormat("+%d", g->scorePopup.chips), center.x, center.y - chipsSize / 2.0f, chipsSize, Fade(COLOR_CHIPS, alpha));
-                    }
+                    drawTextCentered(TextFormat("+%d", g->scorePopup.chips), center.x, center.y - chipsSize / 2.0f, chipsSize, Fade(COLOR_CHIPS, alpha));
                 }
             }
 
@@ -2965,24 +3216,56 @@ int main(void)
                 drawTextCentered("click anywhere to close", SCREEN_WIDTH / 2.0f, summaryY + 26, 14, GRAY);
             }
 
+            if (g->deckEditOpen)
+            {
+                Card composition[DECK_MAX_SIZE];
+                int n = buildFullDeckComposition(g, composition);
+                int cost = deckEditCost(g);
+
+                DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, (Color){ 0, 0, 0, 210 });
+                drawTextCentered(TextFormat("EDIT DECK: %d cards - click a card to %s for $%d",
+                                              n, g->deckEditUpgradeMode ? "upgrade" : "remove", cost),
+                                  SCREEN_WIDTH / 2.0f, 40, 20, COLOR_ACCENT);
+
+                Rectangle removeBtn = { SCREEN_WIDTH / 2.0f - 220, 95, 200, 40 };
+                Rectangle upgradeBtn = { SCREEN_WIDTH / 2.0f + 20, 95, 200, 40 };
+                Rectangle closeBtn = { SCREEN_WIDTH - 130, 20, 100, 40 };
+                drawButton(removeBtn, "REMOVE MODE", COLOR_DANGER, true, !g->deckEditUpgradeMode);
+                drawButton(upgradeBtn, "UPGRADE MODE", COLOR_ACCENT, true, g->deckEditUpgradeMode);
+                drawButton(closeBtn, "CLOSE", COLOR_PROMPT, true, false);
+
+                for (int i = 0; i < n; i++)
+                {
+                    Rectangle r = deckPopupCardRect(i);
+                    drawCard(&composition[i], r);
+                    if (CheckCollisionPointRec(GetMousePosition(), r))
+                        DrawRectangleLinesEx(r, 2, COLOR_PROMPT);
+                }
+            }
+
             if (g->phase == PHASE_GAME_OVER)
             {
                 DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, (Color){ 0, 0, 0, 180 });
-                const char *line1 = (g->gameOverReason == REASON_CRASH)
-                    ? "FATAL ERROR: Memory Limit Exceeded"
-                    : "FATAL ERROR: Quota Not Met";
+                const char *line1 = (g->gameOverReason == REASON_CRASH) ? "FATAL ERROR: Memory Limit Exceeded"
+                    : (g->gameOverReason == REASON_QUOTA) ? "FATAL ERROR: Quota Not Met"
+                    : "FATAL ERROR: Turn Limit Reached";
                 drawTextCentered(line1, SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f - 60, 26, COLOR_DANGER);
 
                 const char *line2 = (g->gameOverReason == REASON_CRASH)
                     ? TextFormat("Stack Score hit %d, over the Round %d Stack Limit of %d.",
                                   g->grid.stackScore, g->roundNumber, g->roundCfg.stackLimit)
-                    : TextFormat("Deck ran out on Round %d with %d / %d points - short of the objective.",
-                                  g->roundNumber, g->roundScore, g->roundCfg.objective);
+                    : (g->gameOverReason == REASON_QUOTA)
+                    ? TextFormat("Deck ran out on Round %d with %d / %d points - short of the objective.",
+                                  g->roundNumber, g->roundScore, g->roundCfg.objective)
+                    : TextFormat("Turn %d limit hit on Round %d with %d / %d points - short of the objective.",
+                                  g->roundCfg.turnLimit, g->roundNumber, g->roundScore, g->roundCfg.objective);
                 drawTextCentered(line2, SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f - 25, 17, LIGHTGRAY);
 
                 const char *tip = (g->gameOverReason == REASON_CRASH)
                     ? "Tip: a placement is safe as long as the Stack Score gauge stays under the red line."
-                    : "Tip: clear combos to discard cards and refill your hand - an empty deck ends the round.";
+                    : (g->gameOverReason == REASON_QUOTA)
+                    ? "Tip: clear combos to discard cards and refill your hand - an empty deck ends the round."
+                    : "Tip: score big combos early - the turn counter keeps climbing whether you score or not.";
                 drawTextCentered(tip, SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f + 5, 14, GRAY);
 
                 drawTextCentered("Press R to restart", SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f + 40, 20, RAYWHITE);
@@ -2995,33 +3278,36 @@ int main(void)
 
                 int x = 90, y = 90, lh = 21;
                 DrawText("GOAL", x, y, 17, COLOR_PROMPT); y += lh;
-                DrawText("Reach the Round Score objective before the deck runs out.", x, y, 14, RAYWHITE); y += lh;
-                DrawText("The deck is your only limit - there's no turn counter to race.", x, y, 14, GRAY); y += lh + 8;
+                DrawText("Reach the Round Score objective before the deck or the turn limit runs out.", x, y, 14, RAYWHITE); y += lh + 8;
 
                 DrawText("STACK SCORE - the way you lose", x, y, 17, COLOR_DANGER); y += lh;
                 DrawText("Every card on the 3x3 grid adds its value to the Stack Score.", x, y, 14, RAYWHITE); y += lh;
                 DrawText("If it ever exceeds the Stack Limit, it's an instant game over -", x, y, 14, RAYWHITE); y += lh;
-                DrawText("watch the gauge under the grid; it flashes red near the limit.", x, y, 14, RAYWHITE); y += lh;
+                DrawText("watch the red Danger Meter under the grid.", x, y, 14, RAYWHITE); y += lh;
                 DrawText("Face cards (J/Q/K) and Aces are special - see below.", x, y, 14, GRAY); y += lh + 8;
 
                 DrawText("COMBOS - the way you score, and the way you stay safe", x, y, 17, COLOR_PROMPT); y += lh;
-                DrawText("Line up 3 cells in any row, column, or diagonal:", x, y, 14, RAYWHITE); y += lh;
-                DrawText("  Same Suit (100 pts)", x + 10, y, 14, COLOR_FLASH_SAME_SUIT); y += lh;
-                DrawText("  Straight, consecutive ranks (250 pts)", x + 10, y, 14, COLOR_FLASH_STRAIGHT); y += lh;
-                DrawText("  Same rank / Brelan (400 pts)", x + 10, y, 14, COLOR_FLASH_BRELAN); y += lh;
-                DrawText("  Straight Flush, straight + same suit (1000 pts)", x + 10, y, 14, COLOR_FLASH_STRAIGHT_FLUSH); y += lh;
-                DrawText("A combo discards and refills its 3 cells - that LOWERS your", x, y, 14, RAYWHITE); y += lh;
-                DrawText("Stack Score, so scoring is also how you stay under the limit.", x, y, 14, RAYWHITE); y += lh;
+                DrawText("Line up 3 cells in any row, column, or diagonal (see the legend", x, y, 14, RAYWHITE); y += lh;
+                DrawText("in the bottom-left corner during play):", x, y, 14, RAYWHITE); y += lh;
+                DrawText("  Same Suit (100+ pts)", x + 10, y, 14, COLOR_FLASH_SAME_SUIT); y += lh;
+                DrawText("  Straight, consecutive ranks (250+ pts)", x + 10, y, 14, COLOR_FLASH_STRAIGHT); y += lh;
+                DrawText("  Same rank / Brelan (400+ pts)", x + 10, y, 14, COLOR_FLASH_BRELAN); y += lh;
+                DrawText("  Straight Flush, straight + same suit (1000+ pts)", x + 10, y, 14, COLOR_FLASH_STRAIGHT_FLUSH); y += lh;
+                DrawText("Every combo type scores extra the higher the cards involved -", x, y, 14, RAYWHITE); y += lh;
+                DrawText("riskier, since those same cards raise your Stack Score more.", x, y, 14, RAYWHITE); y += lh;
+                DrawText("A combo discards and refills its cells - that LOWERS your Stack", x, y, 14, RAYWHITE); y += lh;
+                DrawText("Score. Straight and N-of-a-Kind also halve your WHOLE Stack Score,", x, y, 14, RAYWHITE); y += lh;
+                DrawText("once per turn no matter how many of those lines matched at once.", x, y, 14, RAYWHITE); y += lh;
                 DrawText("Hovering a card tints cells green (would combo) or orange", x, y, 14, GRAY); y += lh;
                 DrawText("(one card away) so you can see a line forming before you commit.", x, y, 14, GRAY); y += lh + 8;
 
                 int x2 = 620, y2 = 90;
                 DrawText("FACE CARDS & ACES", x2, y2, 17, COLOR_PROMPT); y2 += lh;
                 DrawText("Jack: swap two cells on the grid.", x2, y2, 14, RAYWHITE); y2 += lh;
-                DrawText("Queen: zeroes and locks its neighbor cells (they stop", x2, y2, 14, RAYWHITE); y2 += lh;
-                DrawText("  counting toward the Stack Score until unlocked).", x2, y2, 14, RAYWHITE); y2 += lh;
-                DrawText("King: flips whether rows/columns or diagonals are", x2, y2, 14, RAYWHITE); y2 += lh;
-                DrawText("  checked for combos next.", x2, y2, 14, RAYWHITE); y2 += lh;
+                DrawText("Queen: resets a neighbor cell's value to 0 and locks it", x2, y2, 14, RAYWHITE); y2 += lh;
+                DrawText("  (stays out of the Stack Score until unlocked).", x2, y2, 14, RAYWHITE); y2 += lh;
+                DrawText("King: flips whether rows/columns or diagonals are checked -", x2, y2, 14, RAYWHITE); y2 += lh;
+                DrawText("  diagonal combos score double while flipped.", x2, y2, 14, RAYWHITE); y2 += lh;
                 DrawText("Ace: counts as 1 or 11, whichever keeps you safer.", x2, y2, 14, RAYWHITE); y2 += lh;
                 DrawText("Center cell has a gold border: any combo through it", x2, y2, 14, RAYWHITE); y2 += lh;
                 DrawText("  scores 1.5x.", x2, y2, 14, RAYWHITE); y2 += lh + 8;
@@ -3029,18 +3315,20 @@ int main(void)
                 DrawText("SHOP", x2, y2, 17, COLOR_PROMPT); y2 += lh;
                 DrawText("Modules are permanent (2 slots); Scripts are one-use", x2, y2, 14, RAYWHITE); y2 += lh;
                 DrawText("(2 slots, duplicates OK). Buying while full offers a swap;", x2, y2, 14, RAYWHITE); y2 += lh;
-                DrawText("owned ones can be sold back for half their price.", x2, y2, 14, RAYWHITE); y2 += lh + 8;
-
-                DrawText("Consecutive turns that combo build a streak (x2, x3...) that", x2, y2, 14, GRAY); y2 += lh;
-                DrawText("multiplies every combo's points - missing a turn resets it.", x2, y2, 14, GRAY); y2 += lh + 8;
+                DrawText("owned ones can be sold back for half their price. Click a module", x2, y2, 14, RAYWHITE); y2 += lh;
+                DrawText("or script during play to see a reminder of what it does.", x2, y2, 14, RAYWHITE); y2 += lh;
+                DrawText("EDIT DECK (in the shop) permanently removes or upgrades a card.", x2, y2, 14, RAYWHITE); y2 += lh + 8;
 
                 DrawText("OTHER HUD NUMBERS", x2, y2, 17, COLOR_PROMPT); y2 += lh;
-                DrawText("Power Budget: how many J/Q/K powers you can use this round -", x2, y2, 14, RAYWHITE); y2 += lh;
-                DrawText("  once it hits 0, face cards still score but stop triggering.", x2, y2, 14, RAYWHITE); y2 += lh;
-                DrawText("Rot: a card left too long in your hand starts counting double", x2, y2, 14, RAYWHITE); y2 += lh;
-                DrawText("  if placed - the HUD warns how many turns you have left.", x2, y2, 14, RAYWHITE); y2 += lh;
+                DrawText("Turn limit: run out of turns before the objective and the round", x2, y2, 14, RAYWHITE); y2 += lh;
+                DrawText("  is lost, same as busting the Stack Limit.", x2, y2, 14, RAYWHITE); y2 += lh;
+                DrawText("Rot (rounds 1-4): a card left too long in your hand starts", x2, y2, 14, RAYWHITE); y2 += lh;
+                DrawText("  counting double if placed.", x2, y2, 14, RAYWHITE); y2 += lh;
+                DrawText("Rot (round 5+): a new grid cell OR hand slot rots every 3 turns", x2, y2, 14, RAYWHITE); y2 += lh;
+                DrawText("  instead - any card that ever lands there counts double too.", x2, y2, 14, RAYWHITE); y2 += lh;
                 DrawText("Mint-green cards are Glitched: half value on the grid, but a", x2, y2, 14, COLOR_SPECIAL_TINT); y2 += lh;
                 DrawText("  big score bonus if you clear them in a combo.", x2, y2, 14, COLOR_SPECIAL_TINT); y2 += lh;
+                DrawText("Press TAB anytime to speed up animations.", x2, y2, 14, GRAY); y2 += lh;
 
                 drawTextCentered("click anywhere, or press H / ESC, to close", SCREEN_WIDTH / 2.0f,
                                   SCREEN_HEIGHT - 40, 15, GRAY);
@@ -3053,6 +3341,7 @@ int main(void)
                 drawMenuButton(pauseButtonRect(0), "RESUME", COLOR_ACCENT);
                 drawMenuButton(pauseButtonRect(1), "RESTART RUN", COLOR_PROMPT);
                 drawMenuButton(pauseButtonRect(2), "QUIT", COLOR_DANGER);
+                drawMenuButton(pauseButtonRect(3), TextFormat("ANIMATION SPEED: %gx", g->animSpeed), COLOR_ACCENT);
             }
             EndMode2D();
         EndTextureMode();

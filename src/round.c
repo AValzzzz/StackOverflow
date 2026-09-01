@@ -12,10 +12,13 @@ RoundConfig round_getConfig(int roundNumber)
     {
         int extraRounds = roundNumber - 3;
         cfg.objective  = 4000 + 2400 * extraRounds;
-        cfg.stackLimit = 60 - extraRounds;
-        if (cfg.stackLimit < 45) cfg.stackLimit = 45;
+        cfg.stackLimit = 60 - (int)(extraRounds * 1.5f);
+        if (cfg.stackLimit < 40) cfg.stackLimit = 40;
         cfg.goldReward = 10 + 2 * extraRounds;
     }
+
+    cfg.turnLimit = 30 - (roundNumber - 1);
+    if (cfg.turnLimit < 16) cfg.turnLimit = 16;
 
     cfg.isBossRound = (roundNumber > 0) && (roundNumber % 5 == 0);
 
@@ -26,6 +29,7 @@ RoundConfig round_getConfig(int roundNumber)
     cfg.unstableDeckActive     = roundNumber >= 5;
     cfg.extendedLockActive     = roundNumber >= 8;
     cfg.memoryCorruptionActive = roundNumber >= 12;
+    cfg.rottenSlotsActive      = roundNumber >= 5;
 
     return cfg;
 }

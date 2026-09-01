@@ -8,6 +8,10 @@
 
 #define KING_FLIP_FREEZE_TURNS 2
 
+#define FACE_VALUE_SCALE 8
+
+#define KING_DIAGONAL_SCORE_MULTIPLIER 2.0f
+
 static int buildLines(int size, int outLines[LINE_COUNT_MAX][LINE_LEN_MAX][2])
 {
     int n = 0;
@@ -50,6 +54,19 @@ static bool lineContainsCell(int line[LINE_LEN_MAX][2], int length, int row, int
     return false;
 }
 
+static bool lineIndex_isDiagonal(int lineIndex, int size)
+{
+    return lineIndex >= 2 * size;
+}
+
+static bool lineIsExactSameSuit(const MemoryGrid *grid, int line[LINE_LEN_MAX][2], int length)
+{
+    Suit first = grid->cards[line[0][0]][line[0][1]].suit;
+    for (int i = 1; i < length; i++)
+        if (grid->cards[line[i][0]][line[i][1]].suit != first) return false;
+    return true;
+}
+
 static bool lineIsActive(int lineIndex, int size, bool diagonalMode, int bannedAxis)
 {
     bool isDiagonal = (lineIndex >= 2 * size);
@@ -59,6 +76,11 @@ static bool lineIsActive(int lineIndex, int size, bool diagonalMode, int bannedA
     if (bannedAxis == BANNED_AXIS_COLS && isCol) return false;
     if (bannedAxis == BANNED_AXIS_DIAGONALS && isDiagonal) return false;
     return diagonalMode ? isDiagonal : !isDiagonal;
+}
+
+static void applySlotRot(MemoryGrid *grid, int row, int col)
+{
+    if (grid->rottenSlot[row][col]) grid->cards[row][col].isRotted = true;
 }
 
 static void releaseQueenLocks(MemoryGrid *grid, int queenRow, int queenCol)
@@ -193,6 +215,7 @@ static int refillCell(MemoryGrid *grid, Deck *deck, int row, int col)
     int oldValue = cellValue(grid, row, col);
     deck_discard(deck, grid->cards[row][col]);
     grid->cards[row][col] = deck_drawCard(deck);
+    applySlotRot(grid, row, col);
     grid->stackScore += cellValue(grid, row, col) - oldValue;
     return bonus;
 }
@@ -206,15 +229,19 @@ void memorygrid_construct(MemoryGrid *grid)
     grid->stackScore = 0;
     grid->diagonalMode = false;
     grid->diagonalModeFrozenTurns = 0;
+    grid->diagonalModeForced = false;
     grid->redundantColorActive = false;
     grid->bankerChipActive = false;
     grid->segfaultHandlerActive = false;
+    grid->cacheBoostActive = false;
+    grid->faceValueBoostActive = false;
     grid->disabledComboType = COMBO_NONE;
     for (int row = 0; row < GRID_SIZE_MAX; row++)
         for (int col = 0; col < GRID_SIZE_MAX; col++)
         {
             grid->lockOwnerRow[row][col] = -1;
             grid->lockOwnerCol[row][col] = -1;
+            grid->rottenSlot[row][col] = false;
         }
 }
 
@@ -227,9 +254,11 @@ void memorygrid_init(MemoryGrid *grid, Deck *deck, int size)
             grid->cards[row][col] = deck_drawCard(deck);
             grid->lockOwnerRow[row][col] = -1;
             grid->lockOwnerCol[row][col] = -1;
+            grid->rottenSlot[row][col] = false;
         }
     grid->diagonalMode = false;
     grid->diagonalModeFrozenTurns = 0;
+    grid->diagonalModeForced = false;
     grid->trapRow = -1;
     grid->trapCol = -1;
     grid->bannedAxis = BANNED_AXIS_NONE;
@@ -255,6 +284,7 @@ void memorygrid_placeCard(MemoryGrid *grid, int row, int col, Card card)
 {
     int oldValue = cellValue(grid, row, col);
     grid->cards[row][col] = card;
+    applySlotRot(grid, row, col);
     grid->stackScore += cellValue(grid, row, col) - oldValue;
 }
 
@@ -285,6 +315,8 @@ void memorygrid_swapCells(MemoryGrid *grid, int row1, int col1, int row2, int co
     Card tmp = grid->cards[row1][col1];
     grid->cards[row1][col1] = grid->cards[row2][col2];
     grid->cards[row2][col2] = tmp;
+    applySlotRot(grid, row1, col1);
+    applySlotRot(grid, row2, col2);
 
     int ownerRowTmp = grid->lockOwnerRow[row1][col1];
     int ownerColTmp = grid->lockOwnerCol[row1][col1];
@@ -298,10 +330,47 @@ void memorygrid_swapCells(MemoryGrid *grid, int row1, int col1, int row2, int co
 
 bool memorygrid_toggleAxisMode(MemoryGrid *grid)
 {
+    if (grid->diagonalModeForced) return false;
     if (grid->diagonalModeFrozenTurns > 0) return false;
     grid->diagonalMode = !grid->diagonalMode;
     grid->diagonalModeFrozenTurns = KING_FLIP_FREEZE_TURNS;
     return true;
+}
+
+void memorygrid_setDiagonalModeForced(MemoryGrid *grid, bool forced)
+{
+    grid->diagonalModeForced = forced;
+    if (forced) grid->diagonalMode = true;
+}
+
+int memorygrid_countRottenCandidates(const MemoryGrid *grid)
+{
+    int count = 0;
+    for (int row = 0; row < grid->size; row++)
+        for (int col = 0; col < grid->size; col++)
+            if (!grid->rottenSlot[row][col] && !grid->cards[row][col].isLocked)
+                count++;
+    return count;
+}
+
+bool memorygrid_addRottenSlotAtIndex(MemoryGrid *grid, int index)
+{
+    int i = 0;
+    for (int row = 0; row < grid->size; row++)
+        for (int col = 0; col < grid->size; col++)
+        {
+            if (grid->rottenSlot[row][col] || grid->cards[row][col].isLocked) continue;
+            if (i == index)
+            {
+                grid->rottenSlot[row][col] = true;
+                int before = cellValue(grid, row, col);
+                applySlotRot(grid, row, col);
+                grid->stackScore += cellValue(grid, row, col) - before;
+                return true;
+            }
+            i++;
+        }
+    return false;
 }
 
 void memorygrid_tickTurn(MemoryGrid *grid)
@@ -369,6 +438,27 @@ void memorygrid_setSegfaultHandlerActive(MemoryGrid *grid, bool active)
     grid->segfaultHandlerActive = active;
 }
 
+void memorygrid_setCacheBoostActive(MemoryGrid *grid, bool active)
+{
+    grid->cacheBoostActive = active;
+}
+
+void memorygrid_setFaceValueBoostActive(MemoryGrid *grid, bool active)
+{
+    grid->faceValueBoostActive = active;
+}
+
+void memorygrid_clearAllRot(MemoryGrid *grid)
+{
+    for (int row = 0; row < grid->size; row++)
+        for (int col = 0; col < grid->size; col++)
+        {
+            grid->cards[row][col].isRotted = false;
+            grid->rottenSlot[row][col] = false;
+        }
+    grid->stackScore = memorygrid_calculateStackScore(grid);
+}
+
 void memorygrid_setDisabledCombo(MemoryGrid *grid, ComboType disabled)
 {
     grid->disabledComboType = disabled;
@@ -401,6 +491,7 @@ void memorygrid_memoryFlush(MemoryGrid *grid, Deck *deck, int row, int col)
         int oldValue = cellValue(grid, row, col);
         deck_discard(deck, grid->cards[row][col]);
         grid->cards[row][col] = deck_drawCard(deck);
+        applySlotRot(grid, row, col);
         grid->stackScore += cellValue(grid, row, col) - oldValue;
     }
 }
@@ -557,8 +648,26 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
         {
             anyMatch = true;
             int base = memorygrid_comboBasePoints(lineTypes[l]);
+
+            int faceValueSum = 0;
+            for (int i = 0; i < grid->size; i++)
+                faceValueSum += card_getEffectiveValue(&grid->cards[lines[l][i][0]][lines[l][i][1]]);
+            int faceValueBonus = faceValueSum - 2 * grid->size;
+            float faceValueScale = grid->faceValueBoostActive ? FACE_VALUE_SCALE * 1.5f : FACE_VALUE_SCALE;
+            if (faceValueBonus > 0) base += (int)(faceValueBonus * faceValueScale);
+
+            if (lineTypes[l] == COMBO_SAME_SUIT && grid->redundantColorActive &&
+                !lineIsExactSameSuit(grid, lines[l], grid->size))
+                base /= 2;
+
+            if (grid->diagonalMode && lineIndex_isDiagonal(l, grid->size))
+                base = (int)(base * KING_DIAGONAL_SCORE_MULTIPLIER);
+
             if (grid->size == 3 && lineContainsCell(lines[l], grid->size, L1_CACHE_ROW, L1_CACHE_COL))
-                base = (int)(base * L1_CACHE_BONUS_MULTIPLIER);
+            {
+                float l1Mult = grid->cacheBoostActive ? 2.0f : L1_CACHE_BONUS_MULTIPLIER;
+                base = (int)(base * l1Mult);
+            }
 
             if (grid->trapRow >= 0 && lineContainsCell(lines[l], grid->size, grid->trapRow, grid->trapCol))
                 base = 0;
@@ -602,6 +711,7 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
                 if (deck_isEmpty(deck)) continue;
                 deck_discard(deck, grid->cards[row][col]);
                 grid->cards[row][col] = deck_drawCard(deck);
+                applySlotRot(grid, row, col);
             }
         }
         grid->stackScore = memorygrid_calculateStackScore(grid);
@@ -610,9 +720,11 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
         return result;
     }
 
+    bool anyHalving = false;
     for (int l = 0; l < lineCount; l++)
         if (lineTypes[l] == COMBO_STRAIGHT || lineTypes[l] == COMBO_BRELAN)
-            grid->stackScore /= 2;
+            anyHalving = true;
+    if (anyHalving) grid->stackScore /= 2;
 
     for (int row = 0; row < grid->size; row++)
         for (int col = 0; col < grid->size; col++)

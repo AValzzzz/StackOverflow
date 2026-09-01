@@ -17,8 +17,11 @@ typedef enum ShopItemId {
     ITEM_SEGFAULT_HANDLER, 
     ITEM_OVERCLOCK,        
     ITEM_STACK_TRACE,    
-    ITEM_ROLLBACK,       
-    ITEM_MULTITHREAD,   
+    ITEM_ROLLBACK,
+    ITEM_MULTITHREAD,
+    ITEM_CACHE_BOOST,
+    ITEM_LOOP_UNROLL,
+    ITEM_DEFRAG,
     ITEM_COUNT
 } ShopItemId;
 

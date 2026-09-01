@@ -30,6 +30,8 @@ void deck_injectCard(Deck *deck, Card card);
 
 bool deck_purgeRank(Deck *deck, Rank rank);
 
+bool deck_removeOneMatching(Deck *deck, Suit suit, Rank rank);
+
 Card deck_drawLowestValueCard(Deck *deck);
 
 Card deck_drawCardBelow(Deck *deck, int belowValue);

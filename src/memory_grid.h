@@ -43,16 +43,21 @@ typedef struct MemoryGrid {
     int  stackScore;
     bool diagonalMode;
     int  diagonalModeFrozenTurns;
+    bool diagonalModeForced;
     bool redundantColorActive;
     bool bankerChipActive;
     bool segfaultHandlerActive;
+    bool cacheBoostActive;
+    bool faceValueBoostActive;
     ComboType disabledComboType;
     int  lockOwnerRow[GRID_SIZE_MAX][GRID_SIZE_MAX];
     int  lockOwnerCol[GRID_SIZE_MAX][GRID_SIZE_MAX];
 
-    int  trapRow, trapCol;   
-    int  bannedAxis;         
-    bool scoreThresholdActive; 
+    int  trapRow, trapCol;
+    int  bannedAxis;
+    bool scoreThresholdActive;
+
+    bool rottenSlot[GRID_SIZE_MAX][GRID_SIZE_MAX];
 } MemoryGrid;
 
 void memorygrid_construct(MemoryGrid *grid);
@@ -80,12 +85,20 @@ void memorygrid_queenLock(MemoryGrid *grid, int queenRow, int queenCol,
 void memorygrid_setRedundantColorActive(MemoryGrid *grid, bool active);
 void memorygrid_setBankerChipActive(MemoryGrid *grid, bool active);
 void memorygrid_setSegfaultHandlerActive(MemoryGrid *grid, bool active);
+void memorygrid_setCacheBoostActive(MemoryGrid *grid, bool active);
+void memorygrid_setFaceValueBoostActive(MemoryGrid *grid, bool active);
+
+void memorygrid_clearAllRot(MemoryGrid *grid);
 
 void memorygrid_setDisabledCombo(MemoryGrid *grid, ComboType disabled);
 
 void memorygrid_setTrapCell(MemoryGrid *grid, int row, int col);
-void memorygrid_setBannedAxis(MemoryGrid *grid, int axis);      
+void memorygrid_setBannedAxis(MemoryGrid *grid, int axis);
 void memorygrid_setScoreThresholdActive(MemoryGrid *grid, bool active);
+
+void memorygrid_setDiagonalModeForced(MemoryGrid *grid, bool forced);
+int  memorygrid_countRottenCandidates(const MemoryGrid *grid);
+bool memorygrid_addRottenSlotAtIndex(MemoryGrid *grid, int index);
 
 void memorygrid_memoryFlush(MemoryGrid *grid, Deck *deck, int row, int col);
 

@@ -7,12 +7,14 @@ typedef struct RoundConfig {
     int roundNumber;
     int objective;
     int stackLimit;
+    int turnLimit;
     int goldReward;
     bool isBossRound;
     ComboType disabledCombo;
     bool unstableDeckActive;
     bool extendedLockActive;
     bool memoryCorruptionActive;
+    bool rottenSlotsActive;
 } RoundConfig;
 
 RoundConfig round_getConfig(int roundNumber);

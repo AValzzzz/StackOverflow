@@ -117,6 +117,20 @@ bool deck_hasCardBelow(const Deck *deck, int belowValue)
     return false;
 }
 
+bool deck_removeOneMatching(Deck *deck, Suit suit, Rank rank)
+{
+    for (int i = 0; i < deck->count; i++)
+    {
+        if (deck->cards[i].suit == suit && deck->cards[i].rank == rank)
+        {
+            deck->cards[i] = deck->cards[deck->count - 1];
+            deck->count--;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool deck_purgeRank(Deck *deck, Rank rank)
 {
     for (int i = 0; i < deck->count; i++)
