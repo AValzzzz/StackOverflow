@@ -20,7 +20,9 @@ typedef struct Deck {
 void deck_initStandard52(Deck *deck); 
 void deck_shuffle(Deck *deck);        
 bool deck_isEmpty(const Deck *deck); 
-Card deck_drawCard(Deck *deck);      
+Card deck_drawCard(Deck *deck);
+
+Card deck_drawCardWeighted(Deck *deck, float lowBias);
 
 void deck_discard(Deck *deck, Card card);
 

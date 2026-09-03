@@ -2,16 +2,37 @@
 
 void inventory_init(Inventory *inv)
 {
-    for (int i = 0; i < MODULE_SLOTS; i++) inv->modules[i] = NO_ITEM;
+    for (int i = 0; i < MODULE_SLOTS; i++)
+    {
+        inv->modules[i] = NO_ITEM;
+        inv->moduleLevels[i] = 0;
+    }
     for (int i = 0; i < SCRIPT_SLOTS; i++) inv->scripts[i] = NO_ITEM;
-    inv->tryCatchChargeAvailable = false;
+    inv->classModule = NO_ITEM;
+    inv->classModuleLevel = 0;
+    inv->tryCatchCharges = 0;
 }
 
 bool inventory_hasModule(const Inventory *inv, ShopItemId id)
 {
+    if (inv->classModule == (int)id) return true;
     for (int i = 0; i < MODULE_SLOTS; i++)
         if (inv->modules[i] == (int)id) return true;
     return false;
+}
+
+int inventory_getModuleLevel(const Inventory *inv, ShopItemId id)
+{
+    if (inv->classModule == (int)id) return inv->classModuleLevel;
+    for (int i = 0; i < MODULE_SLOTS; i++)
+        if (inv->modules[i] == (int)id) return inv->moduleLevels[i];
+    return 0;
+}
+
+void inventory_grantClassModule(Inventory *inv, ShopItemId id)
+{
+    inv->classModule = (int)id;
+    inv->classModuleLevel = 1;
 }
 
 static int firstFree(const int *slots, int count)
@@ -23,10 +44,23 @@ static int firstFree(const int *slots, int count)
 
 bool inventory_buyModule(Inventory *inv, ShopItemId id)
 {
-    if (inventory_hasModule(inv, id)) return false;
+    if (inv->classModule == (int)id)
+    {
+        if (inv->classModuleLevel >= MODULE_MAX_LEVEL) return false;
+        inv->classModuleLevel++;
+        return true;
+    }
+    for (int i = 0; i < MODULE_SLOTS; i++)
+    {
+        if (inv->modules[i] != (int)id) continue;
+        if (inv->moduleLevels[i] >= MODULE_MAX_LEVEL) return false;
+        inv->moduleLevels[i]++;
+        return true;
+    }
     int slot = firstFree(inv->modules, MODULE_SLOTS);
     if (slot < 0) return false;
     inv->modules[slot] = (int)id;
+    inv->moduleLevels[slot] = 1;
     return true;
 }
 
@@ -46,6 +80,7 @@ void inventory_consumeScript(Inventory *inv, int slotIndex)
 void inventory_removeModule(Inventory *inv, int slotIndex)
 {
     inv->modules[slotIndex] = NO_ITEM;
+    inv->moduleLevels[slotIndex] = 0;
 }
 
 bool inventory_moduleSlotsFull(const Inventory *inv)
@@ -60,5 +95,5 @@ bool inventory_scriptSlotsFull(const Inventory *inv)
 
 void inventory_onRoundStart(Inventory *inv)
 {
-    inv->tryCatchChargeAvailable = inventory_hasModule(inv, ITEM_TRY_CATCH);
+    inv->tryCatchCharges = inventory_getModuleLevel(inv, ITEM_TRY_CATCH);
 }

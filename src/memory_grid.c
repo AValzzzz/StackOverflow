@@ -2,7 +2,7 @@
 
 #include <stdlib.h>
 
-#define SPECIAL_CLEAR_BONUS_MULTIPLIER 20
+#define GLITCH_CLEAR_BONUS_MULTIPLIER 2
 
 #define L1_CACHE_BONUS_MULTIPLIER 1.5f
 
@@ -10,7 +10,20 @@
 
 #define FACE_VALUE_SCALE 8
 
-#define KING_DIAGONAL_SCORE_MULTIPLIER 2.0f
+#define KING_DIAGONAL_SCORE_MULTIPLIER 2.5f
+
+#define OVERCLOCK_BRELAN_CHIP_BONUS 50
+#define JIT_COMPILER_BONUS_PER_GLITCH 2.0f
+#define CLUB_BONUS_MULTIPLIER 2.0f
+#define GLITCH_EXPLOIT_MULTIPLIER 3.0f
+#define GARBAGE_COLLECTOR_BONUS_PER_COMBO 0.2f
+#define MODULE_MAX_LEVEL_LOCAL 3
+
+#define STACK_SOFT_CAP_RATIO  0.70f
+#define STACK_SOFT_CAP_FACTOR 0.5f
+
+#define DRAW_BIAS_DANGER_RATIO 0.35f
+#define DRAW_BIAS_MAX          1.4f
 
 static int buildLines(int size, int outLines[LINE_COUNT_MAX][LINE_LEN_MAX][2])
 {
@@ -28,23 +41,65 @@ static int buildLines(int size, int outLines[LINE_COUNT_MAX][LINE_LEN_MAX][2])
     return n;
 }
 
+static bool bankerChipCoversRank(int level, Rank rank)
+{
+    if (level <= 0) return false;
+    if (rank == RANK_JACK) return true;
+    if (level >= 2 && rank == RANK_QUEEN) return true;
+    if (level >= 3 && rank == RANK_KING) return true;
+    return false;
+}
+
+static int amortizationThreshold(int level)
+{
+    if (level >= 3) return 9;
+    if (level == 2) return 7;
+    return 5;
+}
+
 static int cellValue(const MemoryGrid *grid, int row, int col)
 {
     const Card *card = &grid->cards[row][col];
     if (card->isLocked) return 0;
-    if (grid->bankerChipActive &&
-        (card->rank == RANK_JACK || card->rank == RANK_QUEEN || card->rank == RANK_KING))
+    if (bankerChipCoversRank(grid->bankerChipLevel, card->rank))
         return 0;
-    int value = card_getEffectiveValue(card);
-    if (card->isSpecial) value /= 2;
-    if (card->isRotted) value *= 2;
+
+    int value;
+    if (card->isRotted && grid->stackCanaryLevel > 0)
+    {
+        int mult = card_rotMultiplier(card);
+        int reducedMult = 1 + (mult - 1) / (grid->stackCanaryLevel + 1);
+        value = (int)card->rank * reducedMult;
+    }
+    else
+    {
+        value = card_getEffectiveValue(card);
+    }
+
+    if (card->isGlitched) value = (value + 1) / 2;
+    if (card->isDiscounted) value = (value + 1) / 2;
+
+    if (grid->coreDumpLevel > 0 && (card->isGlitched || card->isRotted))
+    {
+        value -= 2 * grid->coreDumpLevel;
+        if (value < 0) value = 0;
+    }
+
+    if (grid->amortizationLevel > 0 && (int)card->rank <= amortizationThreshold(grid->amortizationLevel))
+        value = (value + 1) / 2;
+
+    if (grid->deallocatorLevel > 0 && (int)card->suit == grid->deallocatorSuit)
+        value = (value * (4 - grid->deallocatorLevel) + 3) / 4;
+
+    if (col == grid->leakColumn) value += grid->leakAmount;
     return value;
 }
 
 static int suitGroup(const MemoryGrid *grid, Suit suit)
 {
-    if (!grid->redundantColorActive) return (int)suit;
-    return (suit == SUIT_HEART || suit == SUIT_DIAMOND) ? 0 : 1;
+    if (grid->redundantWarmLevel > 0 && (suit == SUIT_HEART || suit == SUIT_DIAMOND)) return 0;
+    if (grid->redundantCoolLevel > 0 && (suit == SUIT_CLUB || suit == SUIT_SPADE)) return 1;
+    return 10 + (int)suit;
 }
 
 static bool lineContainsCell(int line[LINE_LEN_MAX][2], int length, int row, int col)
@@ -76,11 +131,6 @@ static bool lineIsActive(int lineIndex, int size, bool diagonalMode, int bannedA
     if (bannedAxis == BANNED_AXIS_COLS && isCol) return false;
     if (bannedAxis == BANNED_AXIS_DIAGONALS && isDiagonal) return false;
     return diagonalMode ? isDiagonal : !isDiagonal;
-}
-
-static void applySlotRot(MemoryGrid *grid, int row, int col)
-{
-    if (grid->rottenSlot[row][col]) grid->cards[row][col].isRotted = true;
 }
 
 static void releaseQueenLocks(MemoryGrid *grid, int queenRow, int queenCol)
@@ -204,18 +254,39 @@ int memorygrid_classifyAllLines(const MemoryGrid *grid, LineClassification outLi
     return lineCount;
 }
 
-static int refillCell(MemoryGrid *grid, Deck *deck, int row, int col)
+int memorygrid_softenedStackScore(int rawScore, int stackLimit)
+{
+    if (stackLimit <= 0) return rawScore;
+    float threshold = STACK_SOFT_CAP_RATIO * (float)stackLimit;
+    if ((float)rawScore <= threshold) return rawScore;
+    float excess = (float)rawScore - threshold;
+    return (int)(threshold + excess * STACK_SOFT_CAP_FACTOR);
+}
+
+float memorygrid_drawBiasForHeadroom(int stackScore, int stackLimit)
+{
+    if (stackLimit <= 0) return 0.0f;
+    int effective = memorygrid_softenedStackScore(stackScore, stackLimit);
+    float headroom = (float)(stackLimit - effective) / (float)stackLimit;
+    if (headroom >= DRAW_BIAS_DANGER_RATIO) return 0.0f;
+    if (headroom < 0.0f) headroom = 0.0f;
+    float danger = 1.0f - headroom / DRAW_BIAS_DANGER_RATIO;
+    return DRAW_BIAS_MAX * danger * danger;
+}
+
+static int refillCell(MemoryGrid *grid, Deck *deck, int row, int col, int stackLimit, bool discountRefill)
 {
     if (grid->cards[row][col].isLocked) return 0;
-    releaseQueenLocks(grid, row, col); 
+    releaseQueenLocks(grid, row, col);
     int bonus = 0;
-    if (grid->cards[row][col].isSpecial)
-        bonus = card_getEffectiveValue(&grid->cards[row][col]) * SPECIAL_CLEAR_BONUS_MULTIPLIER;
+    if (grid->cards[row][col].isGlitched)
+        bonus = card_getChipValue(&grid->cards[row][col]) * GLITCH_CLEAR_BONUS_MULTIPLIER;
     if (deck_isEmpty(deck)) return bonus;
     int oldValue = cellValue(grid, row, col);
     deck_discard(deck, grid->cards[row][col]);
-    grid->cards[row][col] = deck_drawCard(deck);
-    applySlotRot(grid, row, col);
+    float bias = memorygrid_drawBiasForHeadroom(grid->stackScore, stackLimit);
+    grid->cards[row][col] = deck_drawCardWeighted(deck, bias);
+    grid->cards[row][col].isDiscounted = discountRefill;
     grid->stackScore += cellValue(grid, row, col) - oldValue;
     return bonus;
 }
@@ -230,18 +301,32 @@ void memorygrid_construct(MemoryGrid *grid)
     grid->diagonalMode = false;
     grid->diagonalModeFrozenTurns = 0;
     grid->diagonalModeForced = false;
-    grid->redundantColorActive = false;
-    grid->bankerChipActive = false;
-    grid->segfaultHandlerActive = false;
-    grid->cacheBoostActive = false;
-    grid->faceValueBoostActive = false;
+    grid->redundantWarmLevel = 0;
+    grid->redundantCoolLevel = 0;
+    grid->bankerChipLevel = 0;
+    grid->cacheBoostLevel = 0;
+    grid->faceValueBoostLevel = 0;
+    grid->overclockLevel = 0;
+    grid->jitCompilerLevel = 0;
+    grid->clubBonusLevel = 0;
+    grid->glitchExploitLevel = 0;
+    grid->garbageCollectorLevel = 0;
+    grid->garbageCollectorMultiplier = 0.0f;
+    grid->coreDumpLevel = 0;
+    grid->stackCanaryLevel = 0;
+    grid->amortizationLevel = 0;
+    grid->diagonalCacheLevel = 0;
+    grid->deallocatorLevel = 0;
+    grid->deallocatorSuit = -1;
+    grid->compressionLevel = 0;
+    grid->leakColumn = -1;
+    grid->leakAmount = 0;
     grid->disabledComboType = COMBO_NONE;
     for (int row = 0; row < GRID_SIZE_MAX; row++)
         for (int col = 0; col < GRID_SIZE_MAX; col++)
         {
             grid->lockOwnerRow[row][col] = -1;
             grid->lockOwnerCol[row][col] = -1;
-            grid->rottenSlot[row][col] = false;
         }
 }
 
@@ -254,7 +339,6 @@ void memorygrid_init(MemoryGrid *grid, Deck *deck, int size)
             grid->cards[row][col] = deck_drawCard(deck);
             grid->lockOwnerRow[row][col] = -1;
             grid->lockOwnerCol[row][col] = -1;
-            grid->rottenSlot[row][col] = false;
         }
     grid->diagonalMode = false;
     grid->diagonalModeFrozenTurns = 0;
@@ -282,9 +366,9 @@ bool memorygrid_isCellFree(const MemoryGrid *grid, int row, int col)
 
 void memorygrid_placeCard(MemoryGrid *grid, int row, int col, Card card)
 {
+    releaseQueenLocks(grid, row, col);
     int oldValue = cellValue(grid, row, col);
     grid->cards[row][col] = card;
-    applySlotRot(grid, row, col);
     grid->stackScore += cellValue(grid, row, col) - oldValue;
 }
 
@@ -315,8 +399,6 @@ void memorygrid_swapCells(MemoryGrid *grid, int row1, int col1, int row2, int co
     Card tmp = grid->cards[row1][col1];
     grid->cards[row1][col1] = grid->cards[row2][col2];
     grid->cards[row2][col2] = tmp;
-    applySlotRot(grid, row1, col1);
-    applySlotRot(grid, row2, col2);
 
     int ownerRowTmp = grid->lockOwnerRow[row1][col1];
     int ownerColTmp = grid->lockOwnerCol[row1][col1];
@@ -343,39 +425,10 @@ void memorygrid_setDiagonalModeForced(MemoryGrid *grid, bool forced)
     if (forced) grid->diagonalMode = true;
 }
 
-int memorygrid_countRottenCandidates(const MemoryGrid *grid)
-{
-    int count = 0;
-    for (int row = 0; row < grid->size; row++)
-        for (int col = 0; col < grid->size; col++)
-            if (!grid->rottenSlot[row][col] && !grid->cards[row][col].isLocked)
-                count++;
-    return count;
-}
-
-bool memorygrid_addRottenSlotAtIndex(MemoryGrid *grid, int index)
-{
-    int i = 0;
-    for (int row = 0; row < grid->size; row++)
-        for (int col = 0; col < grid->size; col++)
-        {
-            if (grid->rottenSlot[row][col] || grid->cards[row][col].isLocked) continue;
-            if (i == index)
-            {
-                grid->rottenSlot[row][col] = true;
-                int before = cellValue(grid, row, col);
-                applySlotRot(grid, row, col);
-                grid->stackScore += cellValue(grid, row, col) - before;
-                return true;
-            }
-            i++;
-        }
-    return false;
-}
-
 void memorygrid_tickTurn(MemoryGrid *grid)
 {
     if (grid->diagonalModeFrozenTurns > 0) grid->diagonalModeFrozenTurns--;
+
 }
 
 int memorygrid_queenNeighbors(int row, int col, int size, bool includeDiagonals, int outNeighbors[8][2])
@@ -422,40 +475,120 @@ void memorygrid_queenLock(MemoryGrid *grid, int queenRow, int queenCol,
     }
 }
 
-void memorygrid_setRedundantColorActive(MemoryGrid *grid, bool active)
+void memorygrid_setRedundantColorLevels(MemoryGrid *grid, int warmLevel, int coolLevel)
 {
-    grid->redundantColorActive = active;
+    grid->redundantWarmLevel = warmLevel;
+    grid->redundantCoolLevel = coolLevel;
 }
 
-void memorygrid_setBankerChipActive(MemoryGrid *grid, bool active)
+void memorygrid_setBankerChipLevel(MemoryGrid *grid, int level)
 {
-    grid->bankerChipActive = active;
+    grid->bankerChipLevel = level;
     grid->stackScore = memorygrid_calculateStackScore(grid);
 }
 
-void memorygrid_setSegfaultHandlerActive(MemoryGrid *grid, bool active)
+void memorygrid_setCacheBoostLevel(MemoryGrid *grid, int level)
 {
-    grid->segfaultHandlerActive = active;
+    grid->cacheBoostLevel = level;
 }
 
-void memorygrid_setCacheBoostActive(MemoryGrid *grid, bool active)
+void memorygrid_setFaceValueBoostLevel(MemoryGrid *grid, int level)
 {
-    grid->cacheBoostActive = active;
+    grid->faceValueBoostLevel = level;
 }
 
-void memorygrid_setFaceValueBoostActive(MemoryGrid *grid, bool active)
+void memorygrid_setOverclockLevel(MemoryGrid *grid, int level)
 {
-    grid->faceValueBoostActive = active;
+    grid->overclockLevel = level;
+}
+
+void memorygrid_setJitCompilerLevel(MemoryGrid *grid, int level)
+{
+    grid->jitCompilerLevel = level;
+}
+
+void memorygrid_setClubBonusLevel(MemoryGrid *grid, int level)
+{
+    grid->clubBonusLevel = level;
+}
+
+void memorygrid_setGlitchExploitLevel(MemoryGrid *grid, int level)
+{
+    grid->glitchExploitLevel = level;
+}
+
+void memorygrid_setGarbageCollectorLevel(MemoryGrid *grid, int level)
+{
+    grid->garbageCollectorLevel = level;
+}
+
+void memorygrid_setCoreDumpLevel(MemoryGrid *grid, int level)
+{
+    grid->coreDumpLevel = level;
+    grid->stackScore = memorygrid_calculateStackScore(grid);
+}
+
+void memorygrid_setStackCanaryLevel(MemoryGrid *grid, int level)
+{
+    grid->stackCanaryLevel = level;
+    grid->stackScore = memorygrid_calculateStackScore(grid);
+}
+
+void memorygrid_setAmortizationLevel(MemoryGrid *grid, int level)
+{
+    grid->amortizationLevel = level;
+    grid->stackScore = memorygrid_calculateStackScore(grid);
+}
+
+void memorygrid_setDiagonalCacheLevel(MemoryGrid *grid, int level)
+{
+    grid->diagonalCacheLevel = level;
+}
+
+void memorygrid_setCompressionLevel(MemoryGrid *grid, int level)
+{
+    grid->compressionLevel = level;
+}
+
+void memorygrid_setDeallocatorLevel(MemoryGrid *grid, int level)
+{
+    grid->deallocatorLevel = level;
+    grid->stackScore = memorygrid_calculateStackScore(grid);
+}
+
+void memorygrid_setDeallocatorSuit(MemoryGrid *grid, int suit)
+{
+    grid->deallocatorSuit = suit;
+}
+
+void memorygrid_setColumnLeak(MemoryGrid *grid, int col, int amount)
+{
+    grid->leakColumn = col;
+    grid->leakAmount = amount;
+    grid->stackScore = memorygrid_calculateStackScore(grid);
+}
+
+void memorygrid_clearColumnLeak(MemoryGrid *grid)
+{
+    grid->leakColumn = -1;
+    grid->leakAmount = 0;
+    grid->stackScore = memorygrid_calculateStackScore(grid);
+}
+
+int memorygrid_freeCellCount(const MemoryGrid *grid)
+{
+    int count = 0;
+    for (int row = 0; row < grid->size; row++)
+        for (int col = 0; col < grid->size; col++)
+            if (!grid->cards[row][col].isLocked) count++;
+    return count;
 }
 
 void memorygrid_clearAllRot(MemoryGrid *grid)
 {
     for (int row = 0; row < grid->size; row++)
         for (int col = 0; col < grid->size; col++)
-        {
-            grid->cards[row][col].isRotted = false;
-            grid->rottenSlot[row][col] = false;
-        }
+            card_clearRot(&grid->cards[row][col]);
     grid->stackScore = memorygrid_calculateStackScore(grid);
 }
 
@@ -491,62 +624,13 @@ void memorygrid_memoryFlush(MemoryGrid *grid, Deck *deck, int row, int col)
         int oldValue = cellValue(grid, row, col);
         deck_discard(deck, grid->cards[row][col]);
         grid->cards[row][col] = deck_drawCard(deck);
-        applySlotRot(grid, row, col);
         grid->stackScore += cellValue(grid, row, col) - oldValue;
     }
 }
 
 void memorygrid_resolveAceValues(MemoryGrid *grid, int stackLimit)
 {
-    int lines[LINE_COUNT_MAX][LINE_LEN_MAX][2];
-    int lineCount = buildLines(grid->size, lines);
-
-    for (int row = 0; row < grid->size; row++)
-    {
-        for (int col = 0; col < grid->size; col++)
-        {
-            Card *card = &grid->cards[row][col];
-            if (card->rank != RANK_ACE) continue;
-
-            if (grid->segfaultHandlerActive)
-            {
-                card->aceAsEleven = true;
-                int scoreHigh = memorygrid_calculateStackScore(grid);
-                card->aceAsEleven = false;
-                int scoreLow = memorygrid_calculateStackScore(grid);
-                if (scoreHigh <= stackLimit)      card->aceAsEleven = true;
-                else if (scoreLow <= stackLimit)  card->aceAsEleven = false;
-                else                              card->aceAsEleven = true; 
-                continue;
-            }
-
-            bool alignsHigh = false, alignsLow = false;
-
-            card->aceAsEleven = true;
-            for (int l = 0; l < lineCount && !alignsHigh; l++)
-                if (lineIsActive(l, grid->size, grid->diagonalMode, grid->bannedAxis) && lineContainsCell(lines[l], grid->size, row, col) &&
-                    classifyLine(grid, lines[l], grid->size) != COMBO_NONE)
-                    alignsHigh = true;
-
-            card->aceAsEleven = false;
-            for (int l = 0; l < lineCount && !alignsLow; l++)
-                if (lineIsActive(l, grid->size, grid->diagonalMode, grid->bannedAxis) && lineContainsCell(lines[l], grid->size, row, col) &&
-                    classifyLine(grid, lines[l], grid->size) != COMBO_NONE)
-                    alignsLow = true;
-
-            if (alignsHigh && !alignsLow) { card->aceAsEleven = true; continue; }
-            if (alignsLow && !alignsHigh) { card->aceAsEleven = false; continue; }
-
-            card->aceAsEleven = true;
-            int scoreHigh = memorygrid_calculateStackScore(grid);
-            card->aceAsEleven = false;
-            int scoreLow = memorygrid_calculateStackScore(grid);
-
-            if (scoreHigh <= stackLimit)      card->aceAsEleven = true;
-            else if (scoreLow <= stackLimit)  card->aceAsEleven = false;
-            else                              card->aceAsEleven = true;
-        }
-    }
+    (void)stackLimit;
     grid->stackScore = memorygrid_calculateStackScore(grid);
 }
 
@@ -638,6 +722,12 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
     int lineCount = buildLines(grid->size, lines);
     ComboType lineTypes[LINE_COUNT_MAX];
     bool anyMatch = false;
+    int matchedLineCount = 0;
+
+    int gridGlitchedCount = 0;
+    for (int row = 0; row < grid->size; row++)
+        for (int col = 0; col < grid->size; col++)
+            if (grid->cards[row][col].isRotted || grid->cards[row][col].isGlitched) gridGlitchedCount++;
 
     for (int l = 0; l < lineCount; l++)
     {
@@ -647,42 +737,100 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
         if (matched)
         {
             anyMatch = true;
-            int base = memorygrid_comboBasePoints(lineTypes[l]);
+
+            int baseChips = memorygrid_comboBasePoints(lineTypes[l]);
 
             int faceValueSum = 0;
+            int glitchedCount = 0;
+            bool containsClub = false;
             for (int i = 0; i < grid->size; i++)
-                faceValueSum += card_getEffectiveValue(&grid->cards[lines[l][i][0]][lines[l][i][1]]);
+            {
+                const Card *c = &grid->cards[lines[l][i][0]][lines[l][i][1]];
+                faceValueSum += card_getChipValue(c);
+                if (c->isRotted || c->isGlitched) glitchedCount++;
+                if (c->suit == SUIT_CLUB) containsClub = true;
+            }
             int faceValueBonus = faceValueSum - 2 * grid->size;
-            float faceValueScale = grid->faceValueBoostActive ? FACE_VALUE_SCALE * 1.5f : FACE_VALUE_SCALE;
-            if (faceValueBonus > 0) base += (int)(faceValueBonus * faceValueScale);
+            float faceValueScale = grid->faceValueBoostLevel > 0
+                ? FACE_VALUE_SCALE * (1.25f + 0.25f * (float)grid->faceValueBoostLevel) : FACE_VALUE_SCALE;
+            int cardBonus = (faceValueBonus > 0) ? (int)(faceValueBonus * faceValueScale) : 0;
 
-            if (lineTypes[l] == COMBO_SAME_SUIT && grid->redundantColorActive &&
+            if (grid->overclockLevel > 0 && lineTypes[l] == COMBO_BRELAN)
+                baseChips += OVERCLOCK_BRELAN_CHIP_BONUS * grid->overclockLevel;
+
+            float multiplier = 1.0f;
+
+            if (grid->clubBonusLevel > 0 && containsClub)
+            {
+                multiplier *= CLUB_BONUS_MULTIPLIER + 0.5f * (float)(grid->clubBonusLevel - 1);
+                result.triggeredClubBonus = true;
+            }
+
+            if (grid->glitchExploitLevel > 0 && glitchedCount > 0)
+            {
+                multiplier *= GLITCH_EXPLOIT_MULTIPLIER + 1.0f * (float)(grid->glitchExploitLevel - 1);
+                result.triggeredGlitchExploit = true;
+            }
+
+            if (lineTypes[l] == COMBO_SAME_SUIT && (grid->redundantWarmLevel > 0 || grid->redundantCoolLevel > 0) &&
                 !lineIsExactSameSuit(grid, lines[l], grid->size))
-                base /= 2;
+            {
+                static const float REDUNDANT_PENALTY_BY_LEVEL[MODULE_MAX_LEVEL_LOCAL + 1] = { 1.0f, 0.5f, 0.65f, 0.8f };
+                int group = suitGroup(grid, grid->cards[lines[l][0][0]][lines[l][0][1]].suit);
+                int mergeLevel = (group == 0) ? grid->redundantWarmLevel : (group == 1 ? grid->redundantCoolLevel : 0);
+                if (mergeLevel < 1) mergeLevel = 1;
+                if (mergeLevel > MODULE_MAX_LEVEL_LOCAL) mergeLevel = MODULE_MAX_LEVEL_LOCAL;
+                multiplier *= REDUNDANT_PENALTY_BY_LEVEL[mergeLevel];
+            }
 
-            if (grid->diagonalMode && lineIndex_isDiagonal(l, grid->size))
-                base = (int)(base * KING_DIAGONAL_SCORE_MULTIPLIER);
+            if (grid->diagonalMode && !grid->diagonalModeForced && lineIndex_isDiagonal(l, grid->size))
+            {
+                multiplier *= KING_DIAGONAL_SCORE_MULTIPLIER;
+                if (grid->diagonalCacheLevel > 0)
+                {
+                    multiplier *= 1.0f + 0.25f * (float)grid->diagonalCacheLevel;
+                    result.triggeredDiagonalCache = true;
+                }
+            }
 
             if (grid->size == 3 && lineContainsCell(lines[l], grid->size, L1_CACHE_ROW, L1_CACHE_COL))
             {
-                float l1Mult = grid->cacheBoostActive ? 2.0f : L1_CACHE_BONUS_MULTIPLIER;
-                base = (int)(base * l1Mult);
+                if (grid->cacheBoostLevel > 0)
+                {
+                    multiplier *= 1.75f + 0.25f * (float)grid->cacheBoostLevel;
+                    result.triggeredCacheBoost = true;
+                }
+                else
+                {
+                    multiplier *= L1_CACHE_BONUS_MULTIPLIER;
+                }
             }
-
-            if (grid->trapRow >= 0 && lineContainsCell(lines[l], grid->size, grid->trapRow, grid->trapCol))
-                base = 0;
 
             if (grid->scoreThresholdActive)
             {
                 int strongCount = 0;
                 for (int i = 0; i < grid->size; i++)
                     if (card_getEffectiveValue(&grid->cards[lines[l][i][0]][lines[l][i][1]]) > 3) strongCount++;
-                base = base * strongCount / grid->size;
+                multiplier *= (float)strongCount / (float)grid->size;
             }
 
-            result.totalScoreGained += base;
+            if (grid->jitCompilerLevel > 0 && gridGlitchedCount > 0)
+            {
+                multiplier += JIT_COMPILER_BONUS_PER_GLITCH * (float)grid->jitCompilerLevel * (float)gridGlitchedCount;
+                result.triggeredJitCompiler = true;
+            }
+
+            if (grid->garbageCollectorMultiplier > 0.0f)
+                multiplier *= 1.0f + grid->garbageCollectorMultiplier;
+
+            if (grid->trapRow >= 0 && lineContainsCell(lines[l], grid->size, grid->trapRow, grid->trapCol))
+                multiplier = 0.0f;
+
+            result.totalScoreGained += (int)((baseChips + cardBonus) * multiplier);
+            if (multiplier > result.bestMultiplier) result.bestMultiplier = multiplier;
             for (int i = 0; i < grid->size; i++)
                 result.cellInvolved[lines[l][i][0]][lines[l][i][1]] = true;
+            matchedLineCount++;
         }
 
         switch (lineTypes[l])
@@ -697,6 +845,13 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
 
     if (!anyMatch) return result;
 
+    if (grid->garbageCollectorLevel > 0)
+    {
+        grid->garbageCollectorMultiplier +=
+            GARBAGE_COLLECTOR_BONUS_PER_COMBO * (float)grid->garbageCollectorLevel * (float)matchedLineCount;
+        result.triggeredGarbageCollector = true;
+    }
+
     if (result.straightFlushMatches > 0)
     {
         for (int row = 0; row < grid->size; row++)
@@ -704,14 +859,13 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
             for (int col = 0; col < grid->size; col++)
             {
                 if (grid->cards[row][col].isLocked) continue;
-                releaseQueenLocks(grid, row, col); 
-                if (grid->cards[row][col].isSpecial)
+                releaseQueenLocks(grid, row, col);
+                if (grid->cards[row][col].isGlitched)
                     result.totalScoreGained +=
-                        card_getEffectiveValue(&grid->cards[row][col]) * SPECIAL_CLEAR_BONUS_MULTIPLIER;
+                        card_getChipValue(&grid->cards[row][col]) * GLITCH_CLEAR_BONUS_MULTIPLIER;
                 if (deck_isEmpty(deck)) continue;
                 deck_discard(deck, grid->cards[row][col]);
                 grid->cards[row][col] = deck_drawCard(deck);
-                applySlotRot(grid, row, col);
             }
         }
         grid->stackScore = memorygrid_calculateStackScore(grid);
@@ -724,12 +878,25 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
     for (int l = 0; l < lineCount; l++)
         if (lineTypes[l] == COMBO_STRAIGHT || lineTypes[l] == COMBO_BRELAN)
             anyHalving = true;
-    if (anyHalving) grid->stackScore /= 2;
 
     for (int row = 0; row < grid->size; row++)
         for (int col = 0; col < grid->size; col++)
             if (result.cellInvolved[row][col])
-                result.totalScoreGained += refillCell(grid, deck, row, col);
+                result.totalScoreGained += refillCell(grid, deck, row, col, stackLimit, anyHalving);
+
+    if (grid->compressionLevel > 0)
+    {
+        float cutFraction = 0.05f * (float)grid->compressionLevel * (float)matchedLineCount;
+        if (cutFraction > 0.9f) cutFraction = 0.9f;
+        grid->stackScore -= (int)((float)grid->stackScore * cutFraction);
+        if (grid->stackScore < 0) grid->stackScore = 0;
+    }
+
+    if (grid->stackScore > stackLimit)
+    {
+        memorygrid_ensureFairDeal(grid, deck, stackLimit, false, FAIR_DEAL_MAX_ATTEMPTS);
+        result.fairDealApplied = (grid->stackScore <= stackLimit);
+    }
 
     return result;
 }

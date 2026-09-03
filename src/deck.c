@@ -40,6 +40,38 @@ Card deck_drawCard(Deck *deck)
     return deck->cards[--deck->count];
 }
 
+Card deck_drawCardWeighted(Deck *deck, float lowBias)
+{
+    if (deck->count <= 0 && deck->discardCount > 0) deck_reshuffleDiscardIntoDeck(deck);
+    if (deck->count <= 0) return card_make(SUIT_HEART, RANK_TWO);
+    if (lowBias <= 0.0f) return deck_drawCard(deck);
+
+    float weights[DECK_MAX_SIZE];
+    float totalWeight = 0.0f;
+    for (int i = 0; i < deck->count; i++)
+    {
+        int value = card_getEffectiveValue(&deck->cards[i]);
+        float w = 1.0f + lowBias * (float)(RANK_KING - value);
+        if (w < 0.05f) w = 0.05f;
+        weights[i] = w;
+        totalWeight += w;
+    }
+
+    float roll = ((float)rand() / ((float)RAND_MAX + 1.0f)) * totalWeight;
+    int index = deck->count - 1;
+    float acc = 0.0f;
+    for (int i = 0; i < deck->count; i++)
+    {
+        acc += weights[i];
+        if (roll < acc) { index = i; break; }
+    }
+
+    Card result = deck->cards[index];
+    deck->cards[index] = deck->cards[deck->count - 1];
+    deck->count--;
+    return result;
+}
+
 void deck_discard(Deck *deck, Card card)
 {
     if (deck->discardCount >= DECK_MAX_SIZE) return;
@@ -68,14 +100,13 @@ Card deck_drawLowestValueCard(Deck *deck)
     if (deck->count <= 0 && deck->discardCount > 0) deck_reshuffleDiscardIntoDeck(deck);
     if (deck->count <= 0) return card_make(SUIT_HEART, RANK_TWO);
     int bestIndex = 0;
-    int bestValue = (deck->cards[0].rank == RANK_ACE) ? 1 : card_getEffectiveValue(&deck->cards[0]);
+    int bestValue = card_getEffectiveValue(&deck->cards[0]);
     for (int i = 1; i < deck->count; i++)
     {
-        int value = (deck->cards[i].rank == RANK_ACE) ? 1 : card_getEffectiveValue(&deck->cards[i]);
+        int value = card_getEffectiveValue(&deck->cards[i]);
         if (value < bestValue) { bestValue = value; bestIndex = i; }
     }
     Card result = deck->cards[bestIndex];
-    if (result.rank == RANK_ACE) result.aceAsEleven = false;
     deck->cards[bestIndex] = deck->cards[deck->count - 1];
     deck->count--;
     return result;
@@ -89,14 +120,13 @@ Card deck_drawCardBelow(Deck *deck, int belowValue)
     int count = 0;
     for (int i = 0; i < deck->count; i++)
     {
-        int value = (deck->cards[i].rank == RANK_ACE) ? 1 : card_getEffectiveValue(&deck->cards[i]);
+        int value = card_getEffectiveValue(&deck->cards[i]);
         if (value < belowValue) candidates[count++] = i;
     }
     if (count == 0) return deck_drawLowestValueCard(deck);
 
     int index = candidates[rand() % count];
     Card result = deck->cards[index];
-    if (result.rank == RANK_ACE) result.aceAsEleven = false;
     deck->cards[index] = deck->cards[deck->count - 1];
     deck->count--;
     return result;
@@ -106,12 +136,12 @@ bool deck_hasCardBelow(const Deck *deck, int belowValue)
 {
     for (int i = 0; i < deck->count; i++)
     {
-        int value = (deck->cards[i].rank == RANK_ACE) ? 1 : card_getEffectiveValue(&deck->cards[i]);
+        int value = card_getEffectiveValue(&deck->cards[i]);
         if (value < belowValue) return true;
     }
     for (int i = 0; i < deck->discardCount; i++)
     {
-        int value = (deck->discardPile[i].rank == RANK_ACE) ? 1 : card_getEffectiveValue(&deck->discardPile[i]);
+        int value = card_getEffectiveValue(&deck->discardPile[i]);
         if (value < belowValue) return true;
     }
     return false;

@@ -29,7 +29,16 @@ typedef struct ComboResult {
     int  brelanMatches;
     int  straightFlushMatches;
     bool gridWasWiped;
+    bool fairDealApplied;
+    float bestMultiplier;
     bool cellInvolved[GRID_SIZE_MAX][GRID_SIZE_MAX];
+
+    bool triggeredClubBonus;
+    bool triggeredGlitchExploit;
+    bool triggeredCacheBoost;
+    bool triggeredJitCompiler;
+    bool triggeredDiagonalCache;
+    bool triggeredGarbageCollector;
 } ComboResult;
 
 #define BANNED_AXIS_NONE      0
@@ -44,11 +53,27 @@ typedef struct MemoryGrid {
     bool diagonalMode;
     int  diagonalModeFrozenTurns;
     bool diagonalModeForced;
-    bool redundantColorActive;
-    bool bankerChipActive;
-    bool segfaultHandlerActive;
-    bool cacheBoostActive;
-    bool faceValueBoostActive;
+    int  redundantWarmLevel; 
+    int  redundantCoolLevel; 
+    int  bankerChipLevel;
+    int  cacheBoostLevel;
+    int  faceValueBoostLevel;
+    int  overclockLevel;
+    int  jitCompilerLevel;
+    int  clubBonusLevel;     
+    int  glitchExploitLevel;  
+    int  garbageCollectorLevel;
+    float garbageCollectorMultiplier;
+
+    int  coreDumpLevel;   
+    int  stackCanaryLevel; 
+
+    int  amortizationLevel; 
+
+    int  diagonalCacheLevel; 
+    int  deallocatorLevel;
+    int  deallocatorSuit; 
+    int  compressionLevel; 
     ComboType disabledComboType;
     int  lockOwnerRow[GRID_SIZE_MAX][GRID_SIZE_MAX];
     int  lockOwnerCol[GRID_SIZE_MAX][GRID_SIZE_MAX];
@@ -57,14 +82,21 @@ typedef struct MemoryGrid {
     int  bannedAxis;
     bool scoreThresholdActive;
 
-    bool rottenSlot[GRID_SIZE_MAX][GRID_SIZE_MAX];
+    int  leakColumn; 
+    int  leakAmount;
+
 } MemoryGrid;
 
 void memorygrid_construct(MemoryGrid *grid);
 
 void memorygrid_init(MemoryGrid *grid, Deck *deck, int size);
 
-int  memorygrid_calculateStackScore(const MemoryGrid *grid); 
+int  memorygrid_calculateStackScore(const MemoryGrid *grid);
+
+int memorygrid_softenedStackScore(int rawScore, int stackLimit);
+
+float memorygrid_drawBiasForHeadroom(int stackScore, int stackLimit);
+
 bool memorygrid_isCellFree(const MemoryGrid *grid, int row, int col); 
 void memorygrid_placeCard(MemoryGrid *grid, int row, int col, Card card); 
 
@@ -82,11 +114,27 @@ int memorygrid_queenNeighbors(int row, int col, int size, bool includeDiagonals,
 void memorygrid_queenLock(MemoryGrid *grid, int queenRow, int queenCol,
                             int lockRow1, int lockCol1, int lockRow2, int lockCol2);
 
-void memorygrid_setRedundantColorActive(MemoryGrid *grid, bool active);
-void memorygrid_setBankerChipActive(MemoryGrid *grid, bool active);
-void memorygrid_setSegfaultHandlerActive(MemoryGrid *grid, bool active);
-void memorygrid_setCacheBoostActive(MemoryGrid *grid, bool active);
-void memorygrid_setFaceValueBoostActive(MemoryGrid *grid, bool active);
+void memorygrid_setRedundantColorLevels(MemoryGrid *grid, int warmLevel, int coolLevel);
+void memorygrid_setBankerChipLevel(MemoryGrid *grid, int level);
+void memorygrid_setCacheBoostLevel(MemoryGrid *grid, int level);
+void memorygrid_setFaceValueBoostLevel(MemoryGrid *grid, int level);
+void memorygrid_setOverclockLevel(MemoryGrid *grid, int level);
+void memorygrid_setJitCompilerLevel(MemoryGrid *grid, int level);
+void memorygrid_setClubBonusLevel(MemoryGrid *grid, int level);
+void memorygrid_setGlitchExploitLevel(MemoryGrid *grid, int level);
+void memorygrid_setGarbageCollectorLevel(MemoryGrid *grid, int level);
+void memorygrid_setCoreDumpLevel(MemoryGrid *grid, int level);
+void memorygrid_setStackCanaryLevel(MemoryGrid *grid, int level);
+void memorygrid_setAmortizationLevel(MemoryGrid *grid, int level);
+void memorygrid_setDiagonalCacheLevel(MemoryGrid *grid, int level);
+void memorygrid_setCompressionLevel(MemoryGrid *grid, int level);
+void memorygrid_setDeallocatorLevel(MemoryGrid *grid, int level);
+void memorygrid_setDeallocatorSuit(MemoryGrid *grid, int suit);
+
+void memorygrid_setColumnLeak(MemoryGrid *grid, int col, int amount);
+void memorygrid_clearColumnLeak(MemoryGrid *grid);
+
+int  memorygrid_freeCellCount(const MemoryGrid *grid);
 
 void memorygrid_clearAllRot(MemoryGrid *grid);
 
@@ -97,8 +145,6 @@ void memorygrid_setBannedAxis(MemoryGrid *grid, int axis);
 void memorygrid_setScoreThresholdActive(MemoryGrid *grid, bool active);
 
 void memorygrid_setDiagonalModeForced(MemoryGrid *grid, bool forced);
-int  memorygrid_countRottenCandidates(const MemoryGrid *grid);
-bool memorygrid_addRottenSlotAtIndex(MemoryGrid *grid, int index);
 
 void memorygrid_memoryFlush(MemoryGrid *grid, Deck *deck, int row, int col);
 

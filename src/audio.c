@@ -16,6 +16,10 @@ static Sound g_crash;
 static Sound g_shuffle;
 static Sound g_shopBuy;
 static Sound g_roundClear;
+static Sound g_uiClick;
+static Sound g_deny;
+static Sound g_glitch;
+static Music g_bgm;
 
 static Sound synthComboChime(void)
 {
@@ -68,6 +72,75 @@ static Sound synthCrashStinger(void)
     return snd;
 }
 
+static Sound synthUiClick(void)
+{
+    const float duration = 0.045f;
+    int frameCount = (int)(duration * SYNTH_SAMPLE_RATE);
+    short *samples = malloc(sizeof(short) * (size_t)frameCount);
+
+    float phase = 0.0f;
+    for (int i = 0; i < frameCount; i++)
+    {
+        float t = (float)i / (float)frameCount;
+        phase += 1400.0f / SYNTH_SAMPLE_RATE;
+        float envelope = powf(1.0f - t, 3.0f);
+        float sample = sinf(2.0f * PI * phase) * envelope * 0.35f;
+        samples[i] = (short)(sample * 32000.0f);
+    }
+
+    Wave wave = { (unsigned int)frameCount, SYNTH_SAMPLE_RATE, 16, 1, samples };
+    Sound snd = LoadSoundFromWave(wave);
+    free(samples);
+    return snd;
+}
+
+static Sound synthDeny(void)
+{
+    const float duration = 0.16f;
+    int frameCount = (int)(duration * SYNTH_SAMPLE_RATE);
+    short *samples = malloc(sizeof(short) * (size_t)frameCount);
+
+    float phase = 0.0f;
+    for (int i = 0; i < frameCount; i++)
+    {
+        float t = (float)i / (float)frameCount;
+        phase += 130.0f / SYNTH_SAMPLE_RATE;
+        float square = (sinf(2.0f * PI * phase) >= 0.0f) ? 1.0f : -1.0f;
+        float envelope = powf(1.0f - t, 1.4f);
+        float sample = square * envelope * 0.4f;
+        samples[i] = (short)(sample * 32000.0f);
+    }
+
+    Wave wave = { (unsigned int)frameCount, SYNTH_SAMPLE_RATE, 16, 1, samples };
+    Sound snd = LoadSoundFromWave(wave);
+    free(samples);
+    return snd;
+}
+
+static Sound synthGlitchStinger(void)
+{
+    const float duration = 0.3f;
+    int frameCount = (int)(duration * SYNTH_SAMPLE_RATE);
+    short *samples = malloc(sizeof(short) * (size_t)frameCount);
+
+    float phase = 0.0f;
+    for (int i = 0; i < frameCount; i++)
+    {
+        float t = (float)i / (float)frameCount;
+        float freq = 220.0f + 900.0f * fabsf(sinf(t * 40.0f));
+        phase += freq / SYNTH_SAMPLE_RATE;
+        float square = (sinf(2.0f * PI * phase) >= 0.0f) ? 1.0f : -1.0f;
+        float envelope = powf(1.0f - t, 1.2f);
+        float sample = square * envelope * 0.45f;
+        samples[i] = (short)(sample * 32000.0f);
+    }
+
+    Wave wave = { (unsigned int)frameCount, SYNTH_SAMPLE_RATE, 16, 1, samples };
+    Sound snd = LoadSoundFromWave(wave);
+    free(samples);
+    return snd;
+}
+
 void audio_loadAll(void)
 {
     InitAudioDevice();
@@ -82,6 +155,14 @@ void audio_loadAll(void)
     g_shuffle = LoadSound("assets/audio/cardShuffle.ogg");
     g_shopBuy = LoadSound("assets/audio/shopBuy.ogg");
     g_roundClear = LoadSound("assets/audio/roundClear.ogg");
+    g_uiClick = synthUiClick();
+    g_deny = synthDeny();
+    g_glitch = synthGlitchStinger();
+
+    g_bgm = LoadMusicStream("assets/audio/bgm_loop.mp3");
+    g_bgm.looping = true;
+    SetMusicVolume(g_bgm, 0.4f);
+    PlayMusicStream(g_bgm);
 }
 
 void audio_unloadAll(void)
@@ -93,6 +174,10 @@ void audio_unloadAll(void)
     UnloadSound(g_shuffle);
     UnloadSound(g_shopBuy);
     UnloadSound(g_roundClear);
+    UnloadSound(g_uiClick);
+    UnloadSound(g_deny);
+    UnloadSound(g_glitch);
+    UnloadMusicStream(g_bgm);
     CloseAudioDevice();
 }
 
@@ -109,3 +194,9 @@ void audio_playCrash(void) { PlaySound(g_crash); }
 void audio_playShuffle(void) { PlaySound(g_shuffle); }
 void audio_playShopBuy(void) { PlaySound(g_shopBuy); }
 void audio_playRoundClear(void) { PlaySound(g_roundClear); }
+void audio_playUiClick(void) { PlaySound(g_uiClick); }
+void audio_playDeny(void) { PlaySound(g_deny); }
+void audio_playGlitch(void) { PlaySound(g_glitch); }
+
+void audio_updateMusic(void) { UpdateMusicStream(g_bgm); }
+void audio_setMusicVolume(float volume) { SetMusicVolume(g_bgm, volume); }

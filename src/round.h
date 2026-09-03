@@ -14,7 +14,9 @@ typedef struct RoundConfig {
     bool unstableDeckActive;
     bool extendedLockActive;
     bool memoryCorruptionActive;
-    bool rottenSlotsActive;
+    bool interruptsActive;
+    bool chessUnlocked;
+    int  glitchEventChancePercent;
 } RoundConfig;
 
 RoundConfig round_getConfig(int roundNumber);

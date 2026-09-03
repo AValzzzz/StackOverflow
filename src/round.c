@@ -29,7 +29,15 @@ RoundConfig round_getConfig(int roundNumber)
     cfg.unstableDeckActive     = roundNumber >= 5;
     cfg.extendedLockActive     = roundNumber >= 8;
     cfg.memoryCorruptionActive = roundNumber >= 12;
-    cfg.rottenSlotsActive      = roundNumber >= 5;
+    cfg.interruptsActive       = roundNumber >= 4;
+    cfg.chessUnlocked          = roundNumber >= 5;
+
+    cfg.glitchEventChancePercent = 0;
+    if (roundNumber >= 3)
+    {
+        int chance = 2 + (roundNumber - 3) / 2;
+        cfg.glitchEventChancePercent = chance > 15 ? 15 : chance;
+    }
 
     return cfg;
 }

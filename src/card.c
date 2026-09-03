@@ -2,24 +2,68 @@
 
 #include <stdio.h>
 
+#define CARD_ROT_CAP_TURNS 3 
 Card card_make(Suit suit, Rank rank)
 {
     Card card;
     card.suit = suit;
     card.rank = rank;
     card.isLocked = false;
-    card.aceAsEleven = true;
-    card.isSpecial = false;
+    card.isGlitched = false;
     card.isRotted = false;
+    card.rotTurns = 0;
     card.isHidden = false;
     card.isEphemeral = false;
+    card.isDiscounted = false;
     return card;
 }
 
 int card_getEffectiveValue(const Card *card)
 {
-    if (card->rank == RANK_ACE) return card->aceAsEleven ? 11 : 1;
+    return (int)card->rank * card_rotMultiplier(card);
+}
+
+int card_getChipValue(const Card *card)
+{
+    if (card->rank == RANK_ACE) return 11;
     return (int)card->rank;
+}
+
+int card_rotMultiplier(const Card *card)
+{
+    if (!card->isRotted) return 1;
+    int turns = card->rotTurns < 1 ? 1 : card->rotTurns;
+    if (turns > CARD_ROT_CAP_TURNS) turns = CARD_ROT_CAP_TURNS;
+    return 1 << turns;
+}
+
+void card_markRotted(Card *card)
+{
+    if (card->isRotted) return;
+    card->isGlitched = false;
+    card->isRotted = true;
+    card->rotTurns = 1;
+}
+
+void card_ageRot(Card *card)
+{
+    if (!card->isRotted) return;
+    if (card->rotTurns < CARD_ROT_CAP_TURNS) card->rotTurns++;
+}
+
+void card_markGlitched(Card *card)
+{
+    if (card->isGlitched) return;
+    card->isRotted = false;
+    card->rotTurns = 0;
+    card->isGlitched = true;
+}
+
+void card_clearRot(Card *card)
+{
+    card->isRotted = false;
+    card->rotTurns = 0;
+    card->isGlitched = false;
 }
 
 const char *card_suitName(Suit suit)

@@ -31,19 +31,31 @@ typedef enum Rank {
 typedef struct Card {
     Suit suit;
     Rank rank;
-    bool isLocked;    
-    bool aceAsEleven; 
-    bool isSpecial;   
-    bool isRotted;    
-    bool isHidden;    
-    bool isEphemeral; 
+    bool isLocked;
+    bool isGlitched;
+    bool isRotted;
+    int  rotTurns;    
+    bool isHidden;
+    bool isEphemeral;
+    bool isDiscounted; 
 } Card;
 
 Card card_make(Suit suit, Rank rank);
+
 int  card_getEffectiveValue(const Card *card);
 
-const char *card_suitName(Suit suit);  
-const char *card_rankLabel(Rank rank);  
+int  card_getChipValue(const Card *card);
+
+int  card_rotMultiplier(const Card *card);
+void card_markRotted(Card *card);
+void card_ageRot(Card *card);
+
+void card_markGlitched(Card *card);
+
+void card_clearRot(Card *card);
+
+const char *card_suitName(Suit suit);
+const char *card_rankLabel(Rank rank);
 
 void card_getTexturePath(const Card *card, char *outPath, size_t outSize);
 

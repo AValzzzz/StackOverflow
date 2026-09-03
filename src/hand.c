@@ -7,7 +7,6 @@ void hand_init(Hand *hand, int capacity)
     for (int i = 0; i < HAND_SIZE; i++)
     {
         hand->occupied[i] = false;
-        hand->turnsHeld[i] = 0;
         hand->rottenSlot[i] = false;
     }
 }
@@ -16,34 +15,22 @@ void hand_discardAll(Hand *hand)
 {
     hand->count = 0;
     for (int i = 0; i < hand->capacity; i++)
-    {
         hand->occupied[i] = false;
-        hand->turnsHeld[i] = 0;
-    }
 }
 
-int hand_fillOneSlot(Hand *hand, Deck *deck)
+int hand_fillOneSlot(Hand *hand, Deck *deck, float lowBias)
 {
     for (int i = 0; i < hand->capacity; i++)
     {
         if (hand->occupied[i]) continue;
         if (deck_isEmpty(deck)) return -1;
-        hand->cards[i] = deck_drawCard(deck);
-        if (hand->rottenSlot[i]) hand->cards[i].isRotted = true;
+        hand->cards[i] = deck_drawCardWeighted(deck, lowBias);
+        if (hand->rottenSlot[i]) card_markRotted(&hand->cards[i]);
         hand->occupied[i] = true;
-        hand->turnsHeld[i] = 0;
         hand->count++;
         return i;
     }
     return -1;
-}
-
-int hand_countRottenCandidates(const Hand *hand)
-{
-    int count = 0;
-    for (int i = 0; i < hand->capacity; i++)
-        if (!hand->rottenSlot[i]) count++;
-    return count;
 }
 
 bool hand_addRottenSlotAtIndex(Hand *hand, int index)
@@ -55,7 +42,7 @@ bool hand_addRottenSlotAtIndex(Hand *hand, int index)
         if (i == index)
         {
             hand->rottenSlot[s] = true;
-            if (hand->occupied[s]) hand->cards[s].isRotted = true;
+            if (hand->occupied[s]) card_markRotted(&hand->cards[s]);
             return true;
         }
         i++;
@@ -67,24 +54,13 @@ Card hand_removeAt(Hand *hand, int index)
 {
     Card card = hand->cards[index];
     hand->occupied[index] = false;
-    hand->turnsHeld[index] = 0;
     hand->count--;
     return card;
 }
 
-bool hand_ageHeldCards(Hand *hand, bool rotEnabled)
+void hand_ageRotValues(Hand *hand)
 {
-    if (!rotEnabled) return false;
-    bool justRotted = false;
     for (int i = 0; i < hand->capacity; i++)
-    {
-        if (!hand->occupied[i]) continue;
-        hand->turnsHeld[i]++;
-        if (hand->turnsHeld[i] >= HAND_ROT_TURNS && !hand->cards[i].isRotted)
-        {
-            hand->cards[i].isRotted = true;
-            justRotted = true;
-        }
-    }
-    return justRotted;
+        if (hand->occupied[i])
+            card_ageRot(&hand->cards[i]);
 }

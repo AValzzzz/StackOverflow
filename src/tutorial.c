@@ -3,25 +3,26 @@
 #include <stdio.h>
 
 #ifdef _WIN32
-    #include <direct.h>   
+    #include <direct.h>
 #else
-    #include <sys/stat.h>  
+    #include <sys/stat.h>
     #include <sys/types.h>
 #endif
 
 #define TUTORIAL_MARKER_PATH "save/tutorial_complete.flag"
+#define CHESS_INTRO_MARKER_PATH "save/chess_tutorial_complete.flag"
 
-bool tutorial_hasCompleted(void)
+static bool markerExists(const char *path)
 {
-    FILE *f = fopen(TUTORIAL_MARKER_PATH, "r");
+    FILE *f = fopen(path, "r");
     if (!f) return false;
     fclose(f);
     return true;
 }
 
-void tutorial_markCompleted(void)
+static void createMarker(const char *path)
 {
-    FILE *f = fopen(TUTORIAL_MARKER_PATH, "w");
+    FILE *f = fopen(path, "w");
     if (!f)
     {
         #ifdef _WIN32
@@ -29,9 +30,29 @@ void tutorial_markCompleted(void)
         #else
             mkdir("save", 0755);
         #endif
-        f = fopen(TUTORIAL_MARKER_PATH, "w");
+        f = fopen(path, "w");
         if (!f) return;
     }
     fputs("1", f);
     fclose(f);
+}
+
+bool tutorial_hasCompleted(void)
+{
+    return markerExists(TUTORIAL_MARKER_PATH);
+}
+
+void tutorial_markCompleted(void)
+{
+    createMarker(TUTORIAL_MARKER_PATH);
+}
+
+bool tutorial_hasSeenChessIntro(void)
+{
+    return markerExists(CHESS_INTRO_MARKER_PATH);
+}
+
+void tutorial_markChessIntroSeen(void)
+{
+    createMarker(CHESS_INTRO_MARKER_PATH);
 }
