@@ -180,7 +180,7 @@ static ComboType classifyLine(const MemoryGrid *grid, int line[LINE_LEN_MAX][2],
         values[i] = card_getEffectiveValue(c);
     }
 
-    for (int i = 1; i < length; i++) 
+    for (int i = 1; i < length; i++)
     {
         int v = values[i], j = i - 1;
         while (j >= 0 && values[j] > v) { values[j + 1] = values[j]; j--; }
@@ -465,8 +465,8 @@ void memorygrid_queenLock(MemoryGrid *grid, int queenRow, int queenCol,
     for (int i = 0; i < 2; i++)
     {
         int row = targets[i][0], col = targets[i][1];
-        if (row < 0 || col < 0) continue; 
-        if (grid->cards[row][col].isLocked) continue; 
+        if (row < 0 || col < 0) continue;
+        if (grid->cards[row][col].isLocked) continue;
         int before = cellValue(grid, row, col);
         grid->cards[row][col].isLocked = true;
         grid->lockOwnerRow[row][col] = queenRow;
@@ -615,7 +615,7 @@ void memorygrid_setScoreThresholdActive(MemoryGrid *grid, bool active)
 
 void memorygrid_memoryFlush(MemoryGrid *grid, Deck *deck, int row, int col)
 {
-    releaseQueenLocks(grid, row, col); 
+    releaseQueenLocks(grid, row, col);
     grid->cards[row][col].isLocked = false;
     grid->lockOwnerRow[row][col] = -1;
     grid->lockOwnerCol[row][col] = -1;
@@ -677,12 +677,12 @@ static bool tryBestMatchBreakingSwap(MemoryGrid *grid)
                     {
                         bestMatches = matches;
                         bestR1 = r1; bestC1 = c1; bestR2 = r2; bestC2 = c2;
-                        if (matches == 0) goto found; 
+                        if (matches == 0) goto found;
                     }
                 }
         }
 found:
-    if (bestR1 == -1) return false; 
+    if (bestR1 == -1) return false;
     memorygrid_swapCells(grid, bestR1, bestC1, bestR2, bestC2);
     return true;
 }
@@ -702,7 +702,7 @@ void memorygrid_ensureFairDeal(MemoryGrid *grid, Deck *deck, int stackLimit,
                 int value = card_getEffectiveValue(&grid->cards[r][c]);
                 if (value > bestValue) { bestValue = value; row = r; col = c; }
             }
-        if (row == -1) break; 
+        if (row == -1) break;
 
         if (!deck_hasCardBelow(deck, bestValue)) break;
 
@@ -723,6 +723,7 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
     ComboType lineTypes[LINE_COUNT_MAX];
     bool anyMatch = false;
     int matchedLineCount = 0;
+    int flushLineCount = 0;
 
     int gridGlitchedCount = 0;
     for (int row = 0; row < grid->size; row++)
@@ -831,6 +832,7 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
             for (int i = 0; i < grid->size; i++)
                 result.cellInvolved[lines[l][i][0]][lines[l][i][1]] = true;
             matchedLineCount++;
+            if (lineTypes[l] == COMBO_SAME_SUIT) flushLineCount++;
         }
 
         switch (lineTypes[l])
@@ -845,10 +847,10 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
 
     if (!anyMatch) return result;
 
-    if (grid->garbageCollectorLevel > 0)
+    if (grid->garbageCollectorLevel > 0 && flushLineCount > 0)
     {
         grid->garbageCollectorMultiplier +=
-            GARBAGE_COLLECTOR_BONUS_PER_COMBO * (float)grid->garbageCollectorLevel * (float)matchedLineCount;
+            GARBAGE_COLLECTOR_BONUS_PER_COMBO * (float)grid->garbageCollectorLevel * (float)flushLineCount;
         result.triggeredGarbageCollector = true;
     }
 

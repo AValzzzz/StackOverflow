@@ -14,15 +14,17 @@ typedef struct Inventory {
     int  modules[MODULE_SLOTS];
     int  moduleLevels[MODULE_SLOTS];
     int  scripts[SCRIPT_SLOTS];
-    int  classModule; 
+    int  classModule;
     int  classModuleLevel;
-    int  tryCatchCharges; 
+    int  tryCatchCharges;
 } Inventory;
 
 void inventory_init(Inventory *inv);
 bool inventory_hasModule(const Inventory *inv, ShopItemId id);
 int  inventory_getModuleLevel(const Inventory *inv, ShopItemId id);
 bool inventory_buyModule(Inventory *inv, ShopItemId id);
+bool inventory_mergeRedundantColor(Inventory *inv);
+bool inventory_convertClassModule(Inventory *inv, ShopItemId id);
 bool inventory_buyScript(Inventory *inv, ShopItemId id);
 void inventory_grantClassModule(Inventory *inv, ShopItemId id);
 void inventory_consumeScript(Inventory *inv, int slotIndex);

@@ -44,12 +44,7 @@ static int firstFree(const int *slots, int count)
 
 bool inventory_buyModule(Inventory *inv, ShopItemId id)
 {
-    if (inv->classModule == (int)id)
-    {
-        if (inv->classModuleLevel >= MODULE_MAX_LEVEL) return false;
-        inv->classModuleLevel++;
-        return true;
-    }
+    if (inv->classModule == (int)id) return false;
     for (int i = 0; i < MODULE_SLOTS; i++)
     {
         if (inv->modules[i] != (int)id) continue;
@@ -61,6 +56,49 @@ bool inventory_buyModule(Inventory *inv, ShopItemId id)
     if (slot < 0) return false;
     inv->modules[slot] = (int)id;
     inv->moduleLevels[slot] = 1;
+    return true;
+}
+
+bool inventory_convertClassModule(Inventory *inv, ShopItemId id)
+{
+    if (inv->classModule != (int)id) return false;
+    int slot = firstFree(inv->modules, MODULE_SLOTS);
+    if (slot < 0) return false;
+
+    int newLevel = inv->classModuleLevel + 1;
+    if (newLevel > MODULE_MAX_LEVEL) newLevel = MODULE_MAX_LEVEL;
+
+    inv->modules[slot] = (int)id;
+    inv->moduleLevels[slot] = newLevel;
+    inv->classModule = NO_ITEM;
+    inv->classModuleLevel = 0;
+    return true;
+}
+
+bool inventory_mergeRedundantColor(Inventory *inv)
+{
+    if (!inventory_hasModule(inv, ITEM_REDUNDANT_WARM) || !inventory_hasModule(inv, ITEM_REDUNDANT_COOL))
+        return false;
+
+    if (inv->classModule == (int)ITEM_REDUNDANT_WARM || inv->classModule == (int)ITEM_REDUNDANT_COOL)
+    {
+        inv->classModule = NO_ITEM;
+        inv->classModuleLevel = 0;
+    }
+
+    int mergeSlot = -1;
+    for (int i = 0; i < MODULE_SLOTS; i++)
+    {
+        if (inv->modules[i] != (int)ITEM_REDUNDANT_WARM && inv->modules[i] != (int)ITEM_REDUNDANT_COOL) continue;
+        if (mergeSlot < 0) mergeSlot = i;
+        else { inv->modules[i] = NO_ITEM; inv->moduleLevels[i] = 0; }
+    }
+
+    if (mergeSlot < 0) mergeSlot = firstFree(inv->modules, MODULE_SLOTS);
+    if (mergeSlot < 0) return false;
+
+    inv->modules[mergeSlot] = (int)ITEM_REDUNDANT_COLOR;
+    inv->moduleLevels[mergeSlot] = 1;
     return true;
 }
 

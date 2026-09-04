@@ -12,8 +12,8 @@
 #include "tutorial.h"
 
 #define SAVE_PATH "save/game_save.dat"
-#define SAVE_MAGIC   0x534B5453u 
-#define SAVE_VERSION 1u
+#define SAVE_MAGIC   0x534B5453u
+#define SAVE_VERSION 2u
 
 typedef struct SaveHeader {
     unsigned int magic;

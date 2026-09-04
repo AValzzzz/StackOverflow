@@ -7,7 +7,7 @@
 #include "chess.h"
 #include "inventory.h"
 
-#define SAVE_MAX_CARDS 32
+#define SAVE_MAX_CARDS 70
 
 typedef struct GameSave {
     int roundNumber;
@@ -22,6 +22,7 @@ typedef struct GameSave {
     int  removedCardCount;
 
     int chessRoster[CHESS_PIECE_TYPE_COUNT];
+    int chessMatchesPlayed;
 
     bool tutorialCompleted;
 } GameSave;

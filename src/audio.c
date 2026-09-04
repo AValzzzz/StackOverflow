@@ -28,14 +28,14 @@ static Sound synthComboChime(void)
     int frameCount = perNote * 2;
     short *samples = malloc(sizeof(short) * (size_t)frameCount);
 
-    const float freqs[2] = { 660.0f, 990.0f }; 
+    const float freqs[2] = { 660.0f, 990.0f };
     float phase = 0.0f;
     for (int i = 0; i < frameCount; i++)
     {
         int noteIndex = (i < perNote) ? 0 : 1;
         phase += freqs[noteIndex] / SYNTH_SAMPLE_RATE;
         float localT = (float)(i % perNote) / (float)perNote;
-        float envelope = sinf(PI * localT); 
+        float envelope = sinf(PI * localT);
         float sample = sinf(2.0f * PI * phase) * envelope * 0.55f;
         samples[i] = (short)(sample * 32000.0f);
     }
@@ -200,3 +200,19 @@ void audio_playGlitch(void) { PlaySound(g_glitch); }
 
 void audio_updateMusic(void) { UpdateMusicStream(g_bgm); }
 void audio_setMusicVolume(float volume) { SetMusicVolume(g_bgm, volume); }
+
+void audio_setSfxVolume(float volume)
+{
+    for (int i = 0; i < PLACE_COUNT; i++) SetSoundVolume(g_place[i], volume);
+    for (int i = 0; i < SLIDE_COUNT; i++) SetSoundVolume(g_slide[i], volume);
+    SetSoundVolume(g_combo, volume);
+    SetSoundVolume(g_crash, volume);
+    SetSoundVolume(g_shuffle, volume);
+    SetSoundVolume(g_shopBuy, volume);
+    SetSoundVolume(g_roundClear, volume);
+    SetSoundVolume(g_uiClick, volume);
+    SetSoundVolume(g_deny, volume);
+    SetSoundVolume(g_glitch, volume);
+}
+
+void audio_setMasterVolume(float volume) { SetMasterVolume(volume); }

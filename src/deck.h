@@ -6,20 +6,20 @@
 #include "card.h"
 
 #define DECK_FULL_SIZE 52
-#define DECK_INJECT_HEADROOM 16 
+#define DECK_INJECT_HEADROOM 18
 #define DECK_MAX_SIZE (DECK_FULL_SIZE + DECK_INJECT_HEADROOM)
 
 typedef struct Deck {
     Card cards[DECK_MAX_SIZE];
-    int  count; 
+    int  count;
 
     Card discardPile[DECK_MAX_SIZE];
     int  discardCount;
 } Deck;
 
-void deck_initStandard52(Deck *deck); 
-void deck_shuffle(Deck *deck);        
-bool deck_isEmpty(const Deck *deck); 
+void deck_initStandard52(Deck *deck);
+void deck_shuffle(Deck *deck);
+bool deck_isEmpty(const Deck *deck);
 Card deck_drawCard(Deck *deck);
 
 Card deck_drawCardWeighted(Deck *deck, float lowBias);

@@ -16,10 +16,10 @@
 
 typedef enum ComboType {
     COMBO_NONE,
-    COMBO_SAME_SUIT,    
-    COMBO_STRAIGHT,     
-    COMBO_BRELAN,        
-    COMBO_STRAIGHT_FLUSH 
+    COMBO_SAME_SUIT,
+    COMBO_STRAIGHT,
+    COMBO_BRELAN,
+    COMBO_STRAIGHT_FLUSH
 } ComboType;
 
 typedef struct ComboResult {
@@ -53,27 +53,27 @@ typedef struct MemoryGrid {
     bool diagonalMode;
     int  diagonalModeFrozenTurns;
     bool diagonalModeForced;
-    int  redundantWarmLevel; 
-    int  redundantCoolLevel; 
+    int  redundantWarmLevel;
+    int  redundantCoolLevel;
     int  bankerChipLevel;
     int  cacheBoostLevel;
     int  faceValueBoostLevel;
     int  overclockLevel;
     int  jitCompilerLevel;
-    int  clubBonusLevel;     
-    int  glitchExploitLevel;  
+    int  clubBonusLevel;
+    int  glitchExploitLevel;
     int  garbageCollectorLevel;
     float garbageCollectorMultiplier;
 
-    int  coreDumpLevel;   
-    int  stackCanaryLevel; 
+    int  coreDumpLevel;
+    int  stackCanaryLevel;
 
-    int  amortizationLevel; 
+    int  amortizationLevel;
 
-    int  diagonalCacheLevel; 
+    int  diagonalCacheLevel;
     int  deallocatorLevel;
-    int  deallocatorSuit; 
-    int  compressionLevel; 
+    int  deallocatorSuit;
+    int  compressionLevel;
     ComboType disabledComboType;
     int  lockOwnerRow[GRID_SIZE_MAX][GRID_SIZE_MAX];
     int  lockOwnerCol[GRID_SIZE_MAX][GRID_SIZE_MAX];
@@ -82,7 +82,7 @@ typedef struct MemoryGrid {
     int  bannedAxis;
     bool scoreThresholdActive;
 
-    int  leakColumn; 
+    int  leakColumn;
     int  leakAmount;
 
 } MemoryGrid;
@@ -97,8 +97,8 @@ int memorygrid_softenedStackScore(int rawScore, int stackLimit);
 
 float memorygrid_drawBiasForHeadroom(int stackScore, int stackLimit);
 
-bool memorygrid_isCellFree(const MemoryGrid *grid, int row, int col); 
-void memorygrid_placeCard(MemoryGrid *grid, int row, int col, Card card); 
+bool memorygrid_isCellFree(const MemoryGrid *grid, int row, int col);
+void memorygrid_placeCard(MemoryGrid *grid, int row, int col, Card card);
 
 void memorygrid_blockCell(MemoryGrid *grid, int row, int col);
 

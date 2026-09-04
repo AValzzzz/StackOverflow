@@ -1,5 +1,9 @@
 #include "round.h"
 
+#include <math.h>
+
+#include "raylib.h"
+
 RoundConfig round_getConfig(int roundNumber)
 {
     RoundConfig cfg;
@@ -11,7 +15,17 @@ RoundConfig round_getConfig(int roundNumber)
     else
     {
         int extraRounds = roundNumber - 3;
-        cfg.objective  = 4000 + 2400 * extraRounds;
+        if (roundNumber <= WIN_ROUND_TARGET)
+        {
+
+            cfg.objective = (int)(4000.0 * pow(1.28, extraRounds));
+        }
+        else
+        {
+            int winObjective = (int)(4000.0 * pow(1.28, WIN_ROUND_TARGET - 3));
+            int postWinRounds = roundNumber - WIN_ROUND_TARGET;
+            cfg.objective = (int)((double)winObjective * pow(1.4, postWinRounds));
+        }
         cfg.stackLimit = 60 - (int)(extraRounds * 1.5f);
         if (cfg.stackLimit < 40) cfg.stackLimit = 40;
         cfg.goldReward = 10 + 2 * extraRounds;
@@ -26,10 +40,10 @@ RoundConfig round_getConfig(int roundNumber)
     if (!cfg.isBossRound && roundNumber % 4 == 0)
         cfg.disabledCombo = (roundNumber % 8 == 0) ? COMBO_BRELAN : COMBO_SAME_SUIT;
 
-    cfg.unstableDeckActive     = roundNumber >= 5;
-    cfg.extendedLockActive     = roundNumber >= 8;
-    cfg.memoryCorruptionActive = roundNumber >= 12;
-    cfg.interruptsActive       = roundNumber >= 4;
+    cfg.unstableDeckActive     = roundNumber >= 5  && GetRandomValue(1, 100) <= 75;
+    cfg.extendedLockActive     = roundNumber >= 8  && GetRandomValue(1, 100) <= 70;
+    cfg.memoryCorruptionActive = roundNumber >= 12 && GetRandomValue(1, 100) <= 65;
+    cfg.interruptsActive       = roundNumber >= 3;
     cfg.chessUnlocked          = roundNumber >= 5;
 
     cfg.glitchEventChancePercent = 0;

@@ -1,13 +1,13 @@
 #include "card_textures.h"
 
-static Texture2D g_cardTextures[SUIT_COUNT][14]; 
+static Texture2D g_cardTextures[SUIT_COUNT][14];
 static Texture2D g_backTexture;
 static Texture2D g_emptyTexture;
 
 static void loadWithPointFilter(Texture2D *tex, const char *path)
 {
     *tex = LoadTexture(path);
-    SetTextureFilter(*tex, TEXTURE_FILTER_POINT); 
+    SetTextureFilter(*tex, TEXTURE_FILTER_POINT);
 }
 
 void cardtex_loadAll(void)

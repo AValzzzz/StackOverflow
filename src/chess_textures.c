@@ -1,6 +1,6 @@
 #include "chess_textures.h"
 
-#define CHESS_SPRITE_SIZE 16
+#define CHESS_SPRITE_SIZE 24
 
 static Texture2D g_whitePieces;
 static Texture2D g_blackPieces;
@@ -9,7 +9,7 @@ void chesstex_loadAll(void)
 {
     g_whitePieces = LoadTexture("assets/pieces/WhitePieces.png");
     g_blackPieces = LoadTexture("assets/pieces/BlackPieces.png");
-    SetTextureFilter(g_whitePieces, TEXTURE_FILTER_POINT); 
+    SetTextureFilter(g_whitePieces, TEXTURE_FILTER_POINT);
     SetTextureFilter(g_blackPieces, TEXTURE_FILTER_POINT);
 }
 

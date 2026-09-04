@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 
-#define CARD_ROT_CAP_TURNS 3 
+#define CARD_ROT_CAP_TURNS 3
 Card card_make(Suit suit, Rank rank)
 {
     Card card;

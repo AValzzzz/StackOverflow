@@ -115,7 +115,7 @@ Card deck_drawLowestValueCard(Deck *deck)
 Card deck_drawCardBelow(Deck *deck, int belowValue)
 {
     if (deck->count <= 0 && deck->discardCount > 0) deck_reshuffleDiscardIntoDeck(deck);
-    if (deck->count <= 0) return card_make(SUIT_HEART, RANK_TWO); 
+    if (deck->count <= 0) return card_make(SUIT_HEART, RANK_TWO);
     int candidates[DECK_MAX_SIZE];
     int count = 0;
     for (int i = 0; i < deck->count; i++)

@@ -34,10 +34,10 @@ typedef struct Card {
     bool isLocked;
     bool isGlitched;
     bool isRotted;
-    int  rotTurns;    
+    int  rotTurns;
     bool isHidden;
     bool isEphemeral;
-    bool isDiscounted; 
+    bool isDiscounted;
 } Card;
 
 Card card_make(Suit suit, Rank rank);

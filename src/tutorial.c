@@ -11,6 +11,8 @@
 
 #define TUTORIAL_MARKER_PATH "save/tutorial_complete.flag"
 #define CHESS_INTRO_MARKER_PATH "save/chess_tutorial_complete.flag"
+#define SHOP_INTRO_MARKER_PATH "save/shop_tutorial_complete.flag"
+#define CONDITION_INTRO_MARKER_PATH "save/condition_tutorial_complete.flag"
 
 static bool markerExists(const char *path)
 {
@@ -55,4 +57,24 @@ bool tutorial_hasSeenChessIntro(void)
 void tutorial_markChessIntroSeen(void)
 {
     createMarker(CHESS_INTRO_MARKER_PATH);
+}
+
+bool tutorial_hasSeenShopIntro(void)
+{
+    return markerExists(SHOP_INTRO_MARKER_PATH);
+}
+
+void tutorial_markShopIntroSeen(void)
+{
+    createMarker(SHOP_INTRO_MARKER_PATH);
+}
+
+bool tutorial_hasSeenConditionIntro(void)
+{
+    return markerExists(CONDITION_INTRO_MARKER_PATH);
+}
+
+void tutorial_markConditionIntroSeen(void)
+{
+    createMarker(CONDITION_INTRO_MARKER_PATH);
 }

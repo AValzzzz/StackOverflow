@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 
+#include "i18n.h"
+
 typedef enum ShopItemId {
     ITEM_WILDCARD = 0,
     ITEM_MEMORY_FLUSH,
@@ -11,7 +13,7 @@ typedef enum ShopItemId {
     ITEM_NULL_POINTER,
     ITEM_REDUNDANT_WARM,
     ITEM_REDUNDANT_COOL,
-    ITEM_REDUNDANT_COLOR, 
+    ITEM_REDUNDANT_COLOR,
     ITEM_BANKER_CHIP,
     ITEM_TRY_CATCH,
     ITEM_PREFETCH,
@@ -41,8 +43,8 @@ typedef enum ShopItemId {
 } ShopItemId;
 
 typedef struct ShopItemInfo {
-    const char *name;
-    const char *description;
+    StrId name;
+    StrId description;
     int  cost;
     bool isModule;
 } ShopItemInfo;

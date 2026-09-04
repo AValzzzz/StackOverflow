@@ -11,4 +11,12 @@ bool tutorial_hasSeenChessIntro(void);
 
 void tutorial_markChessIntroSeen(void);
 
+bool tutorial_hasSeenShopIntro(void);
+
+void tutorial_markShopIntroSeen(void);
+
+bool tutorial_hasSeenConditionIntro(void);
+
+void tutorial_markConditionIntroSeen(void);
+
 #endif

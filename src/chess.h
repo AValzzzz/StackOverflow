@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 #define CHESS_BOARD_SIZE 5
-#define CHESS_MAX_PIECES 20 
+#define CHESS_MAX_PIECES 20
 
 typedef enum ChessPieceType {
     CHESS_PAWN,
@@ -34,7 +34,7 @@ typedef struct ChessBoard {
 } ChessBoard;
 
 typedef struct ChessMoveRecord {
-    bool moved;         
+    bool moved;
     int fromRow, fromCol;
     int toRow, toCol;
     ChessPieceType movedType;
@@ -53,7 +53,9 @@ int  chess_pieceCost(ChessPieceType type);
 const char *chess_pieceName(ChessPieceType type);
 char chess_pieceGlyph(ChessPieceType type);
 
-void chess_buildAiArmy(ChessBoard *b, int roundNumber, bool isBossRound);
+void chess_buildAiArmy(ChessBoard *b, int matchesPlayed, bool isBossRound);
+
+bool chess_reinforceAi(ChessBoard *b);
 
 bool chess_stepOneMove(ChessBoard *b, ChessSide side, ChessMoveRecord *outMove);
 

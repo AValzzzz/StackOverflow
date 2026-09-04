@@ -3,6 +3,8 @@
 
 #include "memory_grid.h"
 
+#define WIN_ROUND_TARGET 10
+
 typedef struct RoundConfig {
     int roundNumber;
     int objective;

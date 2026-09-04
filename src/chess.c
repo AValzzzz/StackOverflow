@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "i18n.h"
+
 #define CHESS_MAX_DESTS 20
 
 static bool inBounds(int r, int c)
@@ -80,12 +82,12 @@ const char *chess_pieceName(ChessPieceType type)
 {
     switch (type)
     {
-        case CHESS_PAWN:   return "Pawn";
-        case CHESS_KNIGHT: return "Knight";
-        case CHESS_BISHOP: return "Bishop";
-        case CHESS_ROOK:   return "Rook";
-        case CHESS_QUEEN:  return "Queen";
-        case CHESS_KING:   return "King";
+        case CHESS_PAWN:   return tr(STR_PIECE_PAWN);
+        case CHESS_KNIGHT: return tr(STR_PIECE_KNIGHT);
+        case CHESS_BISHOP: return tr(STR_PIECE_BISHOP);
+        case CHESS_ROOK:   return tr(STR_PIECE_ROOK);
+        case CHESS_QUEEN:  return tr(STR_PIECE_QUEEN);
+        case CHESS_KING:   return tr(STR_PIECE_KING);
         default:           return "?";
     }
 }
@@ -104,17 +106,17 @@ char chess_pieceGlyph(ChessPieceType type)
     }
 }
 
-void chess_buildAiArmy(ChessBoard *b, int roundNumber, bool isBossRound)
+void chess_buildAiArmy(ChessBoard *b, int matchesPlayed, bool isBossRound)
 {
-    int armySize = 2 + (roundNumber - 5) / 3;
-    if (armySize < 2) armySize = 2;
+
+    int armySize = 3 + matchesPlayed / 2;
     if (armySize > 10) armySize = 10;
     if (isBossRound && armySize < 10) armySize++;
 
     int nonPawn = 0;
-    if (roundNumber >= 8)  nonPawn++;
-    if (roundNumber >= 14) nonPawn++;
-    if (roundNumber >= 20) nonPawn++;
+    if (matchesPlayed >= 3)  nonPawn++;
+    if (matchesPlayed >= 6)  nonPawn++;
+    if (matchesPlayed >= 10) nonPawn++;
     if (nonPawn > armySize) nonPawn = armySize;
     int pawnCount = armySize - nonPawn;
 
@@ -123,9 +125,9 @@ void chess_buildAiArmy(ChessBoard *b, int roundNumber, bool isBossRound)
     ChessPieceType types[10];
     int n = 0;
     for (int i = 0; i < pawnCount; i++) types[n++] = CHESS_PAWN;
-    if (roundNumber >= 8  && n < armySize) types[n++] = TIER1[rand() % 3];
-    if (roundNumber >= 14 && n < armySize) types[n++] = CHESS_ROOK;
-    if (roundNumber >= 20 && n < armySize) types[n++] = CHESS_QUEEN;
+    if (matchesPlayed >= 3  && n < armySize) types[n++] = TIER1[rand() % 3];
+    if (matchesPlayed >= 6  && n < armySize) types[n++] = CHESS_ROOK;
+    if (matchesPlayed >= 10 && n < armySize) types[n++] = CHESS_QUEEN;
 
     int coordR[10], coordC[10], coordCount = 0;
     for (int r = 0; r < 2; r++)
@@ -146,6 +148,36 @@ void chess_buildAiArmy(ChessBoard *b, int roundNumber, bool isBossRound)
 
     for (int i = 0; i < n && i < coordCount; i++)
         chess_placePiece(b, CHESS_SIDE_AI, types[i], coordR[i], coordC[i]);
+}
+
+bool chess_reinforceAi(ChessBoard *b)
+{
+    int pawnIdx = -1, aiCount = 0;
+    for (int i = 0; i < b->count; i++)
+    {
+        if (!b->pieces[i].alive || b->pieces[i].side != CHESS_SIDE_AI) continue;
+        aiCount++;
+        if (b->pieces[i].type == CHESS_PAWN && pawnIdx < 0) pawnIdx = i;
+    }
+
+    if (pawnIdx >= 0 && (aiCount >= 5 || rand() % 2 == 0))
+    {
+        static const ChessPieceType PROMOTIONS[3] = { CHESS_KNIGHT, CHESS_BISHOP, CHESS_ROOK };
+        b->pieces[pawnIdx].type = PROMOTIONS[rand() % 3];
+        return true;
+    }
+
+    if (aiCount >= 10) return false;
+
+    int emptyR[10], emptyC[10], emptyCount = 0;
+    for (int r = 0; r < 2; r++)
+        for (int c = 0; c < CHESS_BOARD_SIZE; c++)
+            if (pieceAt(b, r, c) == NULL) { emptyR[emptyCount] = r; emptyC[emptyCount] = c; emptyCount++; }
+    if (emptyCount == 0) return false;
+
+    int pick = rand() % emptyCount;
+    static const ChessPieceType REINFORCE_TYPES[4] = { CHESS_PAWN, CHESS_PAWN, CHESS_KNIGHT, CHESS_BISHOP };
+    return chess_placePiece(b, CHESS_SIDE_AI, REINFORCE_TYPES[rand() % 4], emptyR[pick], emptyC[pick]);
 }
 
 static void genSlide(ChessBoard *b, const ChessPiece *p, const int dirs[][2], int dirCount,
@@ -200,7 +232,7 @@ static void genSteps(ChessBoard *b, const ChessPiece *p, const int offs[][2], in
 static void genPawn(ChessBoard *b, const ChessPiece *p, int destR[], int destC[], bool destIsCapture[], int *outCount)
 {
     int n = 0;
-    int dir = (p->side == CHESS_SIDE_PLAYER) ? -1 : 1; 
+    int dir = (p->side == CHESS_SIDE_PLAYER) ? -1 : 1;
     int fr = p->row + dir;
 
     if (inBounds(fr, p->col) && pieceAt(b, fr, p->col) == NULL)
