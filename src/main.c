@@ -224,6 +224,7 @@ static void resolveInterrupt(Game *g, bool success, const char *failReason);
 static const char *interruptGroupName(int group);
 static void triggerGlitchBanner(Game *g, const char *text);
 static void trySpawnInterrupt(Game *g, bool comboHappened);
+static void expireInterruptWindow(Game *g);
 
 typedef enum StartingClass {
   CLASS_COMPILER,
@@ -448,7 +449,7 @@ typedef struct Game {
 
   int glitchTrapRow, glitchTrapCol;
   int glitchTrapTurnsLeft;
-  char glitchBannerText[64];
+  char glitchBannerText[160];
   float glitchBannerTimer;
 
   BossType secondaryBossType;
@@ -1096,7 +1097,12 @@ static void drawButton(Rectangle rect, const char *label, Color color,
   bool hovered = enabled && CheckCollisionPointRec(GetMousePosition(), rect);
   Color c = enabled ? color : Fade(color, 0.35f);
   int textSize = 18;
+  int maxTextWidth = (int)rect.width - 16;
   int w = MeasureText(label, textSize);
+  while (w > maxTextWidth && textSize > 10) {
+    textSize -= 1;
+    w = MeasureText(label, textSize);
+  }
   float tx = rect.x + rect.width / 2.0f - w / 2.0f;
   float ty = rect.y + rect.height / 2.0f - textSize / 2.0f;
   if (filled) {
@@ -2118,6 +2124,8 @@ static void finishCascade(Game *g) {
   int streak = g->cascade.wave;
   g->cascade.active = false;
 
+  expireInterruptWindow(g);
+
   int gained = chips;
 
   if (g->roundNumber >= FULL_STACK_MIN_ROUND && totalMatches >= 2) {
@@ -2653,6 +2661,13 @@ static void tickInterrupt(Game *g) {
                              g->interruptLeakStacks *
                                  INTERRUPT_MEMORY_LEAK_GAIN);
   }
+}
+
+static void expireInterruptWindow(Game *g) {
+  if (!g->roundCfg.interruptsActive)
+    return;
+  if (g->interrupt == INTERRUPT_NONE)
+    return;
 
   g->interruptTurnsLeft--;
   if (g->interruptTurnsLeft > 0)
@@ -4986,8 +5001,8 @@ int main(void) {
                              comboTypeName(g->cascade.revealType))
                 : TextFormat(tr(STR_COMBO_CHAIN_RESOLVING),
                              g->cascade.wave + 1);
-        drawTextCentered(banner, SCREEN_WIDTH / 2.0f, 100, 20, c);
-        drawTextCentered(tr(STR_SKIP_AHEAD_HINT), SCREEN_WIDTH / 2.0f, 122, 13,
+        drawTextCentered(banner, SCREEN_WIDTH / 2.0f, 72, 20, c);
+        drawTextCentered(tr(STR_SKIP_AHEAD_HINT), SCREEN_WIDTH / 2.0f, 96, 13,
                          GRAY);
       } else if (g->glitchBannerTimer > 0.0f) {
         float t = g->glitchBannerTimer / 2.2f;
@@ -4995,7 +5010,7 @@ int main(void) {
                                : (t < 0.2f ? t / 0.2f : 1.0f);
         float pulse = (sinf((float)GetTime() * 10.0f) + 1.0f) / 2.0f;
         Color c = Fade(COLOR_GLITCH, alpha);
-        drawTextCentered(g->glitchBannerText, SCREEN_WIDTH / 2.0f, 100, 19, c);
+        drawTextCentered(g->glitchBannerText, SCREEN_WIDTH / 2.0f, 72, 19, c);
         drawGlowEx(gridBoundsRect(g), COLOR_GLITCH,
                    (0.1f + pulse * 0.08f) * alpha, 3, 6.0f);
       }
@@ -5161,8 +5176,9 @@ int main(void) {
         drawTextWrappedClipped(label, slot.x + 8, slot.y + 8, slot.width - 16,
                                48, 14, 16, RAYWHITE);
         if (g->inventory.scripts[i] != NO_ITEM && g->mode == MODE_IDLE)
-          DrawText(tr(STR_CLICK_TO_USE), (int)slot.x + 8, (int)slot.y + 58, 12,
-                   GRAY);
+          drawTextWrappedClipped(tr(STR_CLICK_TO_USE), slot.x + 8, slot.y + 58,
+                                 slot.width - 16, slot.height - 58, 12, 14,
+                                 GRAY);
       }
 
       drawComboLegend(20, 375);
@@ -5550,7 +5566,7 @@ int main(void) {
         float streakT = fminf((float)streak, 5.0f) / 5.0f;
         float streakScale = 1.0f + streakT * 0.6f;
 
-        Vector2 center = {SCREEN_WIDTH / 2.0f, 225.0f};
+        Vector2 center = {SCREEN_WIDTH / 2.0f, 105.0f};
         int chipsSize = (int)(42 * scale * streakScale);
         Color chipsColor = {
             (unsigned char)(COLOR_CHIPS.r +

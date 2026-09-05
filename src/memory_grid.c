@@ -723,7 +723,7 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
     ComboType lineTypes[LINE_COUNT_MAX];
     bool anyMatch = false;
     int matchedLineCount = 0;
-    int flushLineCount = 0;
+    int straightLineCount = 0;
 
     int gridGlitchedCount = 0;
     for (int row = 0; row < grid->size; row++)
@@ -832,7 +832,7 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
             for (int i = 0; i < grid->size; i++)
                 result.cellInvolved[lines[l][i][0]][lines[l][i][1]] = true;
             matchedLineCount++;
-            if (lineTypes[l] == COMBO_SAME_SUIT) flushLineCount++;
+            if (lineTypes[l] == COMBO_STRAIGHT || lineTypes[l] == COMBO_STRAIGHT_FLUSH) straightLineCount++;
         }
 
         switch (lineTypes[l])
@@ -847,10 +847,10 @@ ComboResult memorygrid_resolveAlignments(MemoryGrid *grid, Deck *deck, int stack
 
     if (!anyMatch) return result;
 
-    if (grid->garbageCollectorLevel > 0 && flushLineCount > 0)
+    if (grid->garbageCollectorLevel > 0 && straightLineCount > 0)
     {
         grid->garbageCollectorMultiplier +=
-            GARBAGE_COLLECTOR_BONUS_PER_COMBO * (float)grid->garbageCollectorLevel * (float)flushLineCount;
+            GARBAGE_COLLECTOR_BONUS_PER_COMBO * (float)grid->garbageCollectorLevel * (float)straightLineCount;
         result.triggeredGarbageCollector = true;
     }
 

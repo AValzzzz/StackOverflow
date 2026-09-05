@@ -157,7 +157,8 @@ bool chess_reinforceAi(ChessBoard *b)
     {
         if (!b->pieces[i].alive || b->pieces[i].side != CHESS_SIDE_AI) continue;
         aiCount++;
-        if (b->pieces[i].type == CHESS_PAWN && pawnIdx < 0) pawnIdx = i;
+        if (b->pieces[i].type == CHESS_PAWN && b->pieces[i].row == CHESS_BOARD_SIZE - 1 && pawnIdx < 0)
+            pawnIdx = i;
     }
 
     if (pawnIdx >= 0 && (aiCount >= 5 || rand() % 2 == 0))
