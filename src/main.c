@@ -1276,6 +1276,91 @@ static float drawTextWrappedClipped(const char *text, float x, float y,
   return cursorY;
 }
 
+static float drawTextWrappedCentered(const char *text, float centerX, float y,
+                                     float maxWidth, int fontSize,
+                                     float lineHeight, Color color) {
+  char line[512] = {0};
+  float cursorY = y;
+  const char *wordStart = text;
+
+  while (*wordStart) {
+    const char *wordEnd = wordStart;
+    while (*wordEnd && *wordEnd != ' ')
+      wordEnd++;
+    int wordLen = (int)(wordEnd - wordStart);
+    if (wordLen > 200)
+      wordLen = 200;
+
+    char candidate[512];
+    int lineLen = (int)strlen(line);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+    if (lineLen > 0)
+      snprintf(candidate, sizeof(candidate), "%s %.*s", line, wordLen,
+               wordStart);
+    else
+      snprintf(candidate, sizeof(candidate), "%.*s", wordLen, wordStart);
+#pragma GCC diagnostic pop
+
+    if (lineLen > 0 && MeasureText(candidate, fontSize) > (int)maxWidth) {
+      drawTextCentered(line, centerX, cursorY, fontSize, color);
+      cursorY += lineHeight;
+      snprintf(line, sizeof(line), "%.*s", wordLen, wordStart);
+    } else {
+      snprintf(line, sizeof(line), "%s", candidate);
+    }
+
+    wordStart = wordEnd;
+    while (*wordStart == ' ')
+      wordStart++;
+  }
+  if (line[0] != '\0') {
+    drawTextCentered(line, centerX, cursorY, fontSize, color);
+    cursorY += lineHeight;
+  }
+  return cursorY;
+}
+
+static int countWrappedLines(const char *text, int fontSize, float maxWidth) {
+  char line[512] = {0};
+  const char *wordStart = text;
+  int lines = 0;
+
+  while (*wordStart) {
+    const char *wordEnd = wordStart;
+    while (*wordEnd && *wordEnd != ' ')
+      wordEnd++;
+    int wordLen = (int)(wordEnd - wordStart);
+    if (wordLen > 200)
+      wordLen = 200;
+
+    char candidate[512];
+    int lineLen = (int)strlen(line);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+    if (lineLen > 0)
+      snprintf(candidate, sizeof(candidate), "%s %.*s", line, wordLen,
+               wordStart);
+    else
+      snprintf(candidate, sizeof(candidate), "%.*s", wordLen, wordStart);
+#pragma GCC diagnostic pop
+
+    if (lineLen > 0 && MeasureText(candidate, fontSize) > (int)maxWidth) {
+      lines++;
+      snprintf(line, sizeof(line), "%.*s", wordLen, wordStart);
+    } else {
+      snprintf(line, sizeof(line), "%s", candidate);
+    }
+
+    wordStart = wordEnd;
+    while (*wordStart == ' ')
+      wordStart++;
+  }
+  if (line[0] != '\0')
+    lines++;
+  return lines > 0 ? lines : 1;
+}
+
 static void drawItemTooltip(const ShopItemInfo *info, Rectangle anchor) {
   const float width = 260.0f;
   const float padding = 10.0f;
@@ -1315,6 +1400,14 @@ typedef struct HelpLine {
 #define HELP_CONTENT_TOP 90
 #define HELP_VIEW_TOP 68
 #define HELP_VIEW_BOTTOM (SCREEN_HEIGHT - 55)
+#define HELP_COL0_X 90
+#define HELP_COL1_X 620
+#define HELP_COL0_WIDTH (HELP_COL1_X - HELP_COL0_X - 20)
+#define HELP_COL1_WIDTH (SCREEN_WIDTH - HELP_COL1_X - 40)
+
+static const int HELP_COL_X[2] = {HELP_COL0_X, HELP_COL1_X};
+static const float HELP_COL_WIDTH[2] = {(float)HELP_COL0_WIDTH,
+                                        (float)HELP_COL1_WIDTH};
 
 static int buildHelpLines(HelpLine out[HELP_LINE_CAP],
                           float *outContentHeight) {
@@ -1382,8 +1475,11 @@ static int buildHelpLines(HelpLine out[HELP_LINE_CAP],
 #undef HL
 
   float colY[2] = {(float)HELP_CONTENT_TOP, (float)HELP_CONTENT_TOP};
-  for (int i = 0; i < n; i++)
-    colY[out[i].column] += HELP_LINE_HEIGHT + out[i].gapAfter;
+  for (int i = 0; i < n; i++) {
+    float width = HELP_COL_WIDTH[out[i].column] - out[i].indent;
+    int lines = countWrappedLines(out[i].text, out[i].fontSize, width);
+    colY[out[i].column] += lines * HELP_LINE_HEIGHT + out[i].gapAfter;
+  }
   if (outContentHeight)
     *outContentHeight = fmaxf(colY[0], colY[1]) - (float)HELP_CONTENT_TOP;
 
@@ -1874,8 +1970,8 @@ static void drawChessPanel(Game *g) {
                      CHESS_BOARD_TOP_Y - 20, 15, GRAY);
     drawTextCentered(tr(STR_AUTOCHESS_DORMANT), CHESS_PANEL_CENTER_X,
                      CHESS_BOARD_TOP_Y + 60, 14, GRAY);
-    drawTextCentered(tr(STR_AUTOCHESS_DORMANT_HINT), CHESS_PANEL_CENTER_X,
-                     CHESS_BOARD_TOP_Y + 80, 12, GRAY);
+    drawTextWrappedCentered(tr(STR_AUTOCHESS_DORMANT_HINT), CHESS_PANEL_CENTER_X,
+                            CHESS_BOARD_TOP_Y + 80, 240.0f, 12, 14, GRAY);
     return;
   }
 
@@ -4761,10 +4857,14 @@ int main(void) {
         bool hover = CheckCollisionPointRec(GetMousePosition(), box);
         DrawRectangleRec(box, hover ? (Color){35, 65, 55, 255} : COLOR_SLOT_BG);
         DrawRectangleLinesEx(box, hover ? 3 : 2, COLOR_ACCENT);
-        DrawText(tr(CLASS_INFO[i].name), (int)box.x + 12, (int)box.y + 30, 22,
-                 RAYWHITE);
-        DrawText(tr(CLASS_INFO[i].description), (int)box.x + 12,
-                 (int)box.y + 70, 13, LIGHTGRAY);
+        float classNameEndY = drawTextWrappedClipped(
+            tr(CLASS_INFO[i].name), box.x + 12, box.y + 16, box.width - 24,
+            40, 20, 22, RAYWHITE);
+        drawTextWrappedClipped(tr(CLASS_INFO[i].description), box.x + 12,
+                               classNameEndY + 8, box.width - 24,
+                               (box.y + box.height - 10) -
+                                   (classNameEndY + 8),
+                               13, 17, LIGHTGRAY);
       }
     } else if (g->phase == PHASE_SHOP) {
       DrawText(tr(STR_SHOP_TITLE), 20, 20, 30, COLOR_ACCENT);
@@ -5881,14 +5981,15 @@ int main(void) {
 
       BeginScissorMode(0, HELP_VIEW_TOP, SCREEN_WIDTH,
                        HELP_VIEW_BOTTOM - HELP_VIEW_TOP);
-      int colX[2] = {90, 620};
       float colY[2] = {(float)HELP_CONTENT_TOP - g->helpScrollY,
                        (float)HELP_CONTENT_TOP - g->helpScrollY};
       for (int i = 0; i < helpLineCount; i++) {
         const HelpLine *hl = &helpLines[i];
-        DrawText(hl->text, colX[hl->column] + hl->indent, (int)colY[hl->column],
-                 hl->fontSize, hl->color);
-        colY[hl->column] += HELP_LINE_HEIGHT + hl->gapAfter;
+        float width = HELP_COL_WIDTH[hl->column] - hl->indent;
+        float endY = drawTextWrapped(hl->text, HELP_COL_X[hl->column] + hl->indent,
+                                     colY[hl->column], width, hl->fontSize,
+                                     HELP_LINE_HEIGHT, hl->color);
+        colY[hl->column] = endY + hl->gapAfter;
       }
       EndScissorMode();
 

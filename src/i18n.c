@@ -9,11 +9,11 @@ Language i18n_getLanguage(void) { return g_language; }
 
 static const char *EN[STR_COUNT] = {
     [STR_CLASS_COMPILER_NAME] = "Compiler",
-    [STR_CLASS_COMPILER_DESC] = "Free Compiler Patch script.\nEvery round starts with\n2 pre-glitched cards in the deck",
+    [STR_CLASS_COMPILER_DESC] = "Free Compiler Patch script. Every round starts with 2 pre-glitched cards in the deck",
     [STR_CLASS_BANKER_NAME] = "Banker",
-    [STR_CLASS_BANKER_DESC] = "Starts with Banker Chip:\nJacks score 0 toward the limit",
+    [STR_CLASS_BANKER_DESC] = "Starts with Banker Chip: Jacks score 0 toward the limit",
     [STR_CLASS_ARCHITECT_NAME] = "Architect",
-    [STR_CLASS_ARCHITECT_DESC] = "Starts with Redundant Color\n(Cool: Spades=Clubs for Same Suit)",
+    [STR_CLASS_ARCHITECT_DESC] = "Starts with Redundant Color (Cool: Spades=Clubs for Same Suit)",
 
     [STR_TUT01A] = "Welcome to STACK OVERFLOW!",
     [STR_TUT01B] = "Let's play a short guided round together. Click anywhere to continue.",
@@ -493,11 +493,11 @@ static const char *EN[STR_COUNT] = {
 
 static const char *FR[STR_COUNT] = {
     [STR_CLASS_COMPILER_NAME] = "Compilateur",
-    [STR_CLASS_COMPILER_DESC] = "Script Patch Compilateur gratuit.\nChaque manche commence avec\n2 cartes buguées dans le deck",
+    [STR_CLASS_COMPILER_DESC] = "Script Patch Compilateur gratuit. Chaque manche commence avec 2 cartes buguées dans le deck",
     [STR_CLASS_BANKER_NAME] = "Banquier",
-    [STR_CLASS_BANKER_DESC] = "Commence avec Jeton Bancaire :\nles Valets comptent pour 0 dans la limite",
+    [STR_CLASS_BANKER_DESC] = "Commence avec Jeton Bancaire : les Valets comptent pour 0 dans la limite",
     [STR_CLASS_ARCHITECT_NAME] = "Architecte",
-    [STR_CLASS_ARCHITECT_DESC] = "Commence avec Couleur Redondante\n(Froide : Piques=Trèfles pour Même Couleur)",
+    [STR_CLASS_ARCHITECT_DESC] = "Commence avec Couleur Redondante (Froide : Piques=Trèfles pour Même Couleur)",
 
     [STR_TUT01A] = "Bienvenue dans STACK OVERFLOW !",
     [STR_TUT01B] = "Commençons par jouer ensemble pour bien comprendre les règles. Cliquez n'importe où pour continuer.",
