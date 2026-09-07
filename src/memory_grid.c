@@ -184,7 +184,7 @@ static ComboType classifyLine(const MemoryGrid *grid, int line[LINE_LEN_MAX][2],
         if (refRank < 0) refRank = (int)c->rank;
         else if ((int)c->rank != refRank) sameRank = false;
 
-        nonWildValues[nonWildCount++] = card_getEffectiveValue(c);
+        nonWildValues[nonWildCount++] = (int)c->rank;
     }
 
     for (int i = 1; i < nonWildCount; i++)
@@ -200,8 +200,8 @@ static ComboType classifyLine(const MemoryGrid *grid, int line[LINE_LEN_MAX][2],
         isStraight = false;
 
     ComboType type = COMBO_NONE;
-    if (sameRank) type = COMBO_BRELAN;
-    else if (isStraight && sameSuitExact) type = COMBO_STRAIGHT_FLUSH;
+    if (isStraight && sameSuitExact) type = COMBO_STRAIGHT_FLUSH;
+    else if (sameRank) type = COMBO_BRELAN;
     else if (isStraight) type = COMBO_STRAIGHT;
     else if (sameSuit) type = COMBO_SAME_SUIT;
 
@@ -230,7 +230,7 @@ static bool lineIsNearCombo(const MemoryGrid *grid, int line[LINE_LEN_MAX][2], i
 
     int values[LINE_LEN_MAX];
     for (int i = 0; i < length; i++)
-        values[i] = card_getEffectiveValue(&grid->cards[line[i][0]][line[i][1]]);
+        values[i] = (int)grid->cards[line[i][0]][line[i][1]].rank;
     for (int i = 1; i < length; i++)
     {
         int v = values[i], j = i - 1;

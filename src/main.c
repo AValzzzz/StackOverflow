@@ -103,7 +103,7 @@ static void updateRenderTransform(void) {
 #define UNSTABLE_DECK_TRIGGER_PERCENT 20
 
 #define BOSS_CLEAR_BONUS_GOLD 10
-#define ESCALATING_BOSS_MIN_ROUND 15
+#define ESCALATING_BOSS_MIN_ROUND 10
 #define GLITCH_EVENT_MIN_ROUND 3
 #define GLITCH_LUCKY_GOLD_MIN 2
 #define GLITCH_LUCKY_GOLD_MAX 5
@@ -144,7 +144,7 @@ static void updateRenderTransform(void) {
 #define SHAKE_MAGNITUDE_CRASH 16.0f
 #define SHAKE_DURATION_COMBO 0.22f
 
-#define MAX_COMBO_CASCADE_WAVES 20
+#define MAX_COMBO_CASCADE_WAVES 500
 
 #define CASCADE_WAVE_DELAY 0.55f
 
@@ -348,6 +348,7 @@ typedef struct ChessBattleState {
   int movesPlayed;
   int piecesLostByPlayer;
   int piecesLostByAi;
+  int reinforcementsUsed;
   bool wasDeadlock;
   ChessBattleOutcome outcome;
 } ChessBattleState;
@@ -913,6 +914,12 @@ static bool isClassModuleId(const Game *g, ShopItemId id) {
   return g->inventory.classModule == (int)id;
 }
 
+static bool isRedundantColorSuperseded(const Game *g, ShopItemId id) {
+  if (id != ITEM_REDUNDANT_WARM && id != ITEM_REDUNDANT_COOL)
+    return false;
+  return inventory_hasModule(&g->inventory, ITEM_REDUNDANT_COLOR);
+}
+
 static int shopItemPrice(const Game *g, ShopItemId id) {
   const ShopItemInfo *info = shop_getItemInfo(id);
   if (!info->isModule)
@@ -1116,7 +1123,12 @@ static void drawMenuButton(Rectangle rect, const char *label, Color fillColor) {
                    hovered ? Fade(fillColor, 0.85f) : Fade(fillColor, 0.55f));
   DrawRectangleLinesEx(rect, 2, fillColor);
   int textSize = 20;
+  int maxTextWidth = (int)rect.width - 16;
   int w = MeasureText(label, textSize);
+  while (w > maxTextWidth && textSize > 10) {
+    textSize -= 1;
+    w = MeasureText(label, textSize);
+  }
   DrawText(label, (int)(rect.x + rect.width / 2.0f - w / 2.0f),
            (int)(rect.y + rect.height / 2.0f - textSize / 2.0f), textSize,
            RAYWHITE);
@@ -1176,8 +1188,15 @@ static float drawTextWrapped(const char *text, float x, float y, float maxWidth,
   const char *wordStart = text;
 
   while (*wordStart) {
+    if (*wordStart == '\n') {
+      DrawText(line, (int)x, (int)cursorY, fontSize, color);
+      cursorY += lineHeight;
+      line[0] = '\0';
+      wordStart++;
+      continue;
+    }
     const char *wordEnd = wordStart;
-    while (*wordEnd && *wordEnd != ' ')
+    while (*wordEnd && *wordEnd != ' ' && *wordEnd != '\n')
       wordEnd++;
     int wordLen = (int)(wordEnd - wordStart);
     if (wordLen > 200)
@@ -1541,14 +1560,14 @@ static void drawComboLegend(float x, float y) {
   Rank flushRanks[3] = {RANK_EIGHT, RANK_NINE, RANK_TEN};
 
   float rowH = 50.0f;
-  drawComboLegendRow(x, y, sameSuits, sameRanks, tr(STR_LEGEND_SAMESUIT),
-                     COLOR_FLASH_SAME_SUIT);
-  drawComboLegendRow(x, y + rowH, straightSuits, straightRanks,
-                     tr(STR_LEGEND_STRAIGHT), COLOR_FLASH_STRAIGHT);
-  drawComboLegendRow(x, y + rowH * 2, brelanSuits, brelanRanks,
-                     tr(STR_LEGEND_BRELAN), COLOR_FLASH_BRELAN);
-  drawComboLegendRow(x, y + rowH * 3, flushSuits, flushRanks, tr(STR_LEGEND_SF),
+  drawComboLegendRow(x, y, flushSuits, flushRanks, tr(STR_LEGEND_SF),
                      COLOR_FLASH_STRAIGHT_FLUSH);
+  drawComboLegendRow(x, y + rowH, sameSuits, sameRanks, tr(STR_LEGEND_SAMESUIT),
+                     COLOR_FLASH_SAME_SUIT);
+  drawComboLegendRow(x, y + rowH * 2, straightSuits, straightRanks,
+                     tr(STR_LEGEND_STRAIGHT), COLOR_FLASH_STRAIGHT);
+  drawComboLegendRow(x, y + rowH * 3, brelanSuits, brelanRanks,
+                     tr(STR_LEGEND_BRELAN), COLOR_FLASH_BRELAN);
 }
 
 static float easeOutBack(float t) {
@@ -1767,6 +1786,7 @@ static void drawChessPieceGlyph(Rectangle cell, ChessPieceType type,
 
 #define CHESS_BATTLE_STEP_INTERVAL 0.45f
 #define CHESS_BATTLE_REPORT_DURATION 2.4f
+#define CHESS_MAX_REINFORCEMENTS_PER_BATTLE 2
 
 static void executeChessBattle(Game *g) {
   int movesPerSide = g->cpuCharges;
@@ -1787,6 +1807,7 @@ static void executeChessBattle(Game *g) {
   cb->movesPlayed = 0;
   cb->piecesLostByPlayer = 0;
   cb->piecesLostByAi = 0;
+  cb->reinforcementsUsed = 0;
   cb->wasDeadlock = false;
   cb->outcome = CHESS_OUTCOME_NONE;
 }
@@ -1883,13 +1904,16 @@ static void updateChessBattle(Game *g, float dt) {
     cb->aiTurnPending = false;
 
     int deficit = cb->piecesLostByAi - cb->piecesLostByPlayer;
-    if (deficit > 0) {
+    if (deficit > 0 &&
+        cb->reinforcementsUsed < CHESS_MAX_REINFORCEMENTS_PER_BATTLE) {
       int reinforceChance = 20 + deficit * 15;
       if (reinforceChance > 80)
         reinforceChance = 80;
       if (GetRandomValue(1, 100) <= reinforceChance &&
-          chess_reinforceAi(&g->chessBoard))
+          chess_reinforceAi(&g->chessBoard)) {
+        cb->reinforcementsUsed++;
         triggerGlitchBanner(g, tr(STR_BANNER_AI_REINFORCED));
+      }
     }
 
     bool playerDown = chess_sideEliminated(&g->chessBoard, CHESS_SIDE_PLAYER);
@@ -2535,6 +2559,11 @@ static void updateCascade(Game *g, float dt) {
     return;
   }
 
+  if (g->roundScore + g->cascade.chips >= g->roundCfg.objective) {
+    finishCascade(g);
+    return;
+  }
+
   if (!revealCascadeWave(g)) {
     finishCascade(g);
     return;
@@ -3108,6 +3137,9 @@ static void writeProgressSave(const Game *g) {
 static void startNewRound(Game *g) {
   g->cascade.active = false;
   g->roundCfg = round_getConfig(g->roundNumber);
+  if (g->roundCfg.disabledCombo != COMBO_NONE)
+    g->roundCfg.disabledCombo =
+        (GetRandomValue(0, 1) == 0) ? COMBO_SAME_SUIT : COMBO_BRELAN;
   int overclockLevel = inventory_getModuleLevel(&g->inventory, ITEM_OVERCLOCK);
   if (overclockLevel > 0) {
     float penalty = 0.20f - 0.05f * (float)(overclockLevel - 1);
@@ -3442,7 +3474,7 @@ static void drawTutorialOverlay(const Game *g) {
     bool isCardTarget = (step->kind == TUT_HAND) || (step->kind == TUT_CELL) ||
                         (step->kind == TUT_MSG && step->hl == TUT_HL_L1CACHE);
     if (isCardTarget) {
-      drawGlowEx(target, COLOR_PROMPT, 0.22f + pulse * 0.12f, 3, 6.0f);
+      drawGlowEx(target, COLOR_PROMPT, 0.30f + pulse * 0.16f, 4, 7.0f);
     } else {
       DrawRectangleLinesEx(target, 2, COLOR_PROMPT);
       drawGlowEx(target, COLOR_PROMPT, 0.12f + pulse * 0.08f, 2, 4.0f);
@@ -4204,7 +4236,8 @@ int main(void) {
           int ownedLevel =
               info->isModule ? inventory_getModuleLevel(&g->inventory, id) : 0;
           bool isClassPerk = isClassModuleId(g, id);
-          bool maxed = ownedLevel >= MODULE_MAX_LEVEL;
+          bool maxed =
+              ownedLevel >= MODULE_MAX_LEVEL || isRedundantColorSuperseded(g, id);
           if (maxed)
             continue;
           int price = shopItemPrice(g, id);
@@ -4886,7 +4919,8 @@ int main(void) {
         int ownedLevel =
             info->isModule ? inventory_getModuleLevel(&g->inventory, id) : 0;
         bool isClassPerk = isClassModuleId(g, id);
-        bool maxed = ownedLevel >= MODULE_MAX_LEVEL;
+        bool maxed =
+            ownedLevel >= MODULE_MAX_LEVEL || isRedundantColorSuperseded(g, id);
         bool sold = g->shopOfferSold[slot];
         int price = shopItemPrice(g, id);
         bool affordable = g->gold >= price;

@@ -109,14 +109,16 @@ char chess_pieceGlyph(ChessPieceType type)
 void chess_buildAiArmy(ChessBoard *b, int matchesPlayed, bool isBossRound)
 {
 
-    int armySize = 3 + matchesPlayed / 2;
+    int armySize = 4 + matchesPlayed;
     if (armySize > 10) armySize = 10;
     if (isBossRound && armySize < 10) armySize++;
 
     int nonPawn = 0;
-    if (matchesPlayed >= 3)  nonPawn++;
-    if (matchesPlayed >= 6)  nonPawn++;
-    if (matchesPlayed >= 10) nonPawn++;
+    if (matchesPlayed >= 1) nonPawn++;
+    if (matchesPlayed >= 3) nonPawn++;
+    if (matchesPlayed >= 5) nonPawn++;
+    if (matchesPlayed >= 7) nonPawn++;
+    if (matchesPlayed >= 9) nonPawn++;
     if (nonPawn > armySize) nonPawn = armySize;
     int pawnCount = armySize - nonPawn;
 
@@ -125,9 +127,11 @@ void chess_buildAiArmy(ChessBoard *b, int matchesPlayed, bool isBossRound)
     ChessPieceType types[10];
     int n = 0;
     for (int i = 0; i < pawnCount; i++) types[n++] = CHESS_PAWN;
-    if (matchesPlayed >= 3  && n < armySize) types[n++] = TIER1[rand() % 3];
-    if (matchesPlayed >= 6  && n < armySize) types[n++] = CHESS_ROOK;
-    if (matchesPlayed >= 10 && n < armySize) types[n++] = CHESS_QUEEN;
+    if (matchesPlayed >= 1 && n < armySize) types[n++] = TIER1[rand() % 3];
+    if (matchesPlayed >= 3 && n < armySize) types[n++] = CHESS_ROOK;
+    if (matchesPlayed >= 5 && n < armySize) types[n++] = CHESS_QUEEN;
+    if (matchesPlayed >= 7 && n < armySize) types[n++] = TIER1[rand() % 3];
+    if (matchesPlayed >= 9 && n < armySize) types[n++] = CHESS_ROOK;
 
     int coordR[10], coordC[10], coordCount = 0;
     for (int r = 0; r < 2; r++)
@@ -152,20 +156,11 @@ void chess_buildAiArmy(ChessBoard *b, int matchesPlayed, bool isBossRound)
 
 bool chess_reinforceAi(ChessBoard *b)
 {
-    int pawnIdx = -1, aiCount = 0;
+    int aiCount = 0;
     for (int i = 0; i < b->count; i++)
     {
         if (!b->pieces[i].alive || b->pieces[i].side != CHESS_SIDE_AI) continue;
         aiCount++;
-        if (b->pieces[i].type == CHESS_PAWN && b->pieces[i].row == CHESS_BOARD_SIZE - 1 && pawnIdx < 0)
-            pawnIdx = i;
-    }
-
-    if (pawnIdx >= 0 && (aiCount >= 5 || rand() % 2 == 0))
-    {
-        static const ChessPieceType PROMOTIONS[3] = { CHESS_KNIGHT, CHESS_BISHOP, CHESS_ROOK };
-        b->pieces[pawnIdx].type = PROMOTIONS[rand() % 3];
-        return true;
     }
 
     if (aiCount >= 10) return false;
