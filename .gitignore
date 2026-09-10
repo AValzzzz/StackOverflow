@@ -1,7 +1,9 @@
 obj/
 obj_win/
+obj_web/
 bin/
 dist/
+/web/
 save/
 /stack_overflow
 /stack_overflow.exe

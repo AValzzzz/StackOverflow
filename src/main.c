@@ -7,6 +7,10 @@
 
 #include "raylib.h"
 
+#if defined(PLATFORM_WEB)
+#include <emscripten/emscripten.h>
+#endif
+
 #include "audio.h"
 #include "background.h"
 #include "card.h"
@@ -3745,39 +3749,12 @@ static void debugSkipRound(Game *g) {
 }
 #endif
 
-int main(void) {
-  srand((unsigned int)time(NULL));
+static Game g_game;
+static RenderTexture2D g_canvas;
 
-  SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-  InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "STACK OVERFLOW");
-  SetWindowMinSize(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
-  SetExitKey(KEY_NULL);
-  SetTargetFPS(60);
-  cardtex_loadAll();
-  uitex_loadAll();
-  chesstex_loadAll();
-  audio_loadAll();
-  fonts_loadAll();
-  g_gameFont = fonts_get();
-  background_load(SCREEN_WIDTH, SCREEN_HEIGHT);
-
-  RenderTexture2D canvas = LoadRenderTexture(SCREEN_WIDTH, SCREEN_HEIGHT);
-  SetTextureFilter(canvas.texture, TEXTURE_FILTER_POINT);
-
-  Game game = {0};
-  if (!settings_load(&game.settings))
-    settings_defaults(&game.settings);
-  i18n_setLanguage((Language)game.settings.language);
-  audio_setMusicVolume(game.settings.musicVolume);
-  audio_setSfxVolume(game.settings.sfxVolume);
-  audio_setMasterVolume(game.settings.masterVolume);
-  game.animSpeed = game.settings.animSpeed;
-  fullRestart(&game);
-  game.phase =
-      game.settings.hasChosenLanguage ? PHASE_MAIN_MENU : PHASE_LANGUAGE_SELECT;
-
-  while (!WindowShouldClose() && !game.wantsQuit) {
-    Game *g = &game;
+static void GameFrame(void) {
+    Game *g = &g_game;
+    RenderTexture2D canvas = g_canvas;
 
     audio_updateMusic();
     updateRenderTransform();
@@ -6147,9 +6124,52 @@ int main(void) {
     DrawTexturePro(canvas.texture, canvasSrc, canvasDst, (Vector2){0, 0}, 0.0f,
                    WHITE);
     EndDrawing();
+
+#if defined(PLATFORM_WEB)
+    if (g->wantsQuit)
+      emscripten_cancel_main_loop();
+#endif
+}
+
+#if defined(PLATFORM_WEB)
+EMSCRIPTEN_KEEPALIVE
+#endif
+void AppReady(void) {
+  SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+  InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "STACK OVERFLOW");
+  SetWindowMinSize(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+  SetExitKey(KEY_NULL);
+  SetTargetFPS(60);
+  cardtex_loadAll();
+  uitex_loadAll();
+  chesstex_loadAll();
+  audio_loadAll();
+  fonts_loadAll();
+  g_gameFont = fonts_get();
+  background_load(SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  g_canvas = LoadRenderTexture(SCREEN_WIDTH, SCREEN_HEIGHT);
+  SetTextureFilter(g_canvas.texture, TEXTURE_FILTER_POINT);
+
+  if (!settings_load(&g_game.settings))
+    settings_defaults(&g_game.settings);
+  i18n_setLanguage((Language)g_game.settings.language);
+  audio_setMusicVolume(g_game.settings.musicVolume);
+  audio_setSfxVolume(g_game.settings.sfxVolume);
+  audio_setMasterVolume(g_game.settings.masterVolume);
+  g_game.animSpeed = g_game.settings.animSpeed;
+  fullRestart(&g_game);
+  g_game.phase = g_game.settings.hasChosenLanguage ? PHASE_MAIN_MENU
+                                                    : PHASE_LANGUAGE_SELECT;
+
+#if defined(PLATFORM_WEB)
+  emscripten_set_main_loop(GameFrame, 0, 1);
+#else
+  while (!WindowShouldClose() && !g_game.wantsQuit) {
+    GameFrame();
   }
 
-  UnloadRenderTexture(canvas);
+  UnloadRenderTexture(g_canvas);
   background_unload();
   fonts_unloadAll();
   audio_unloadAll();
@@ -6157,5 +6177,33 @@ int main(void) {
   cardtex_unloadAll();
   chesstex_unloadAll();
   CloseWindow();
+#endif
+}
+
+int main(void) {
+  srand((unsigned int)time(NULL));
+
+#if defined(PLATFORM_WEB)
+  EM_ASM(
+    FS.mkdir('/save');
+    FS.mount(IDBFS, {}, '/save');
+    FS.syncfs(true, function(err) {
+      if (err) console.error('StackOverflow: IDBFS initial sync failed', err);
+      setInterval(function() {
+        FS.syncfs(false, function(syncErr) {
+          if (syncErr) console.error('StackOverflow: IDBFS sync failed', syncErr);
+        });
+      }, 3000);
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'hidden')
+          FS.syncfs(false, function() {});
+      });
+
+      _AppReady();
+    });
+  );
+#else
+  AppReady();
+#endif
   return 0;
 }
